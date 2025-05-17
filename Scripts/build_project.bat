@@ -24,6 +24,7 @@ for /r %1 %%I in (*.c) do (
 
 set "SRC_FILES=!SRC_FILES! "Extra\util.c""
 set "SRC_FILES=!SRC_FILES! "Extra\YetAnotherRenderingAPI\yara_d3d12.c""
+set "SRC_FILES=!SRC_FILES! "Extra\ufbx.c""
 
 rem vcperf /start SessionName
 
