@@ -236,6 +236,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     
     Vec3 camera_position = { 0.0f, 0.0f, -1.0f };
     float camera_yaw = 0.0f;
+    float camera_pitch = 0.0f;
     Mat4 camera_transform = M4D(1.0f);
 
     double frame_time = 0.0f;
@@ -260,9 +261,13 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         if (keyboard_input['A'])
             camera_position = SubV3(camera_position, MulV3F(camera_transform.Columns[0].XYZ, 1.0f * (float)frame_time));
         if (keyboard_input['E'])
-            camera_yaw += 10.0f * (float)frame_time;
+            camera_yaw += 40.0f * (float)frame_time;
         if (keyboard_input['Q'])
-            camera_yaw -= 10.0f * (float)frame_time;
+            camera_yaw -= 40.0f * (float)frame_time;
+        if (keyboard_input['Z'])
+            camera_pitch += 40.0f * (float)frame_time;
+        if (keyboard_input['X'])
+            camera_pitch -= 40.0f * (float)frame_time;
 
         int backbuffer_index = swapchain_get_current_backbuffer_index(swapchain);
         
@@ -286,16 +291,17 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         struct Upload_Buffer* constant_upload_buffer = 0;
         {
             Mat4 camera_translation = Translate(camera_position);
-            Mat4 camera_rotation = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
-            camera_transform = MulM4(camera_translation, camera_rotation);
+            Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
+            Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
+            camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
             Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
             struct Constant constant = { 
                 .model_to_world = M4D(1.0f),
                 .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform))
             };
             device_create_upload_buffer(device, &constant, sizeof(struct Constant), &constant_upload_buffer);
-            command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
         }
+        command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
         
         command_list_set_pipeline_state_object(command_list, pipeline_state_object);
         command_list_set_shader(command_list, shader);
