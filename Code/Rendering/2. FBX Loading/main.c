@@ -145,6 +145,8 @@ struct Mesh_Part
 
     struct Buffer* vertex_buffer;
     struct Buffer* index_buffer;
+
+    struct Buffer* constant_buffer;
 };
 struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
 {
@@ -340,8 +342,43 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
                 device_create_buffer(device, buffer_description, &mesh_part->index_buffer);
             }
 
+            struct Model_Constant
+            {
+                Mat4 model_to_world;
+            };
+            {
+                struct Buffer_Descriptor buffer_description = {
+                    .width = sizeof(struct Model_Constant),
+                    .height = 1,
+                    .descriptor_sets = {
+                        cbv_srv_uav_descriptor_set
+                    },
+                    .descriptor_sets_count = 1,
+                    .buffer_type = BUFFER_TYPE_BUFFER,
+                    .bind_types = {
+                        BIND_TYPE_CBV
+                    },
+                    .bind_types_count = 1
+                };
+                device_create_buffer(device, buffer_description, &mesh_part->constant_buffer);
+            }
+
+            struct Upload_Buffer* constant_upload_buffer = 0;
+            {
+                struct Model_Constant constant = { 
+                    .model_to_world = node_global_transform(node)
+                };
+                device_create_upload_buffer(device, &constant, sizeof(struct Model_Constant), &constant_upload_buffer);
+            }
+            
+            
             command_list_copy_upload_buffer_to_buffer(upload_command_list, vertex_upload_buffer, mesh_part->vertex_buffer);
             command_list_copy_upload_buffer_to_buffer(upload_command_list, index_upload_buffer, mesh_part->index_buffer);
+            command_list_copy_upload_buffer_to_buffer(upload_command_list, constant_upload_buffer, mesh_part->constant_buffer);
+
+            upload_buffer_destroy(vertex_upload_buffer);
+            upload_buffer_destroy(index_upload_buffer);
+            upload_buffer_destroy(constant_upload_buffer);
         }
     }
 
@@ -351,23 +388,17 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
     }
 }
 
-struct Constant
-{
-    Mat4 model_to_world;
-    Mat4 world_to_clip;
-};
-void draw_node(struct Node* node, struct Buffer* constant_buffer, struct Device* device, struct Command_List* command_list, Mat4 world_to_clip)
+void draw_node(struct Node* node, struct Device* device, struct Command_List* command_list)
 {
     if (node->type == NODE_TYPE_MESH)
     {
-        struct Upload_Buffer* constant_upload_buffer = 0;
-        struct Constant constant = { 
-            .model_to_world = node_global_transform(node),
-            .world_to_clip = world_to_clip
-        };
-        device_create_upload_buffer(device, &constant, sizeof(struct Constant), &constant_upload_buffer);
-        command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
-        upload_buffer_destroy(constant_upload_buffer);
+        // struct Upload_Buffer* constant_upload_buffer = 0;
+        // struct Model_Constant constant = { 
+        //     .model_to_world = node_global_transform(node)
+        // };
+        // device_create_upload_buffer(device, &constant, sizeof(struct Model_Constant), &constant_upload_buffer);
+        // command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
+        // upload_buffer_destroy(constant_upload_buffer);
 
         for (size_t i = 0; i < node->mesh.mesh_parts_count; i++)
         {
@@ -375,7 +406,7 @@ void draw_node(struct Node* node, struct Buffer* constant_buffer, struct Device*
             if (mesh_part->vertex_count == 0 || mesh_part->index_count == 0)
                 continue;
 
-            command_list_set_constant_buffer(command_list, constant_buffer, 0);
+            command_list_set_constant_buffer(command_list, mesh_part->constant_buffer, 0);
             command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             command_list_set_vertex_buffer(command_list, mesh_part->vertex_buffer, sizeof(struct Vertex) * mesh_part->vertex_count, sizeof(struct Vertex));
             command_list_set_index_buffer(command_list, mesh_part->index_buffer, sizeof(unsigned int) * mesh_part->index_count, FORMAT_R32_UINT);
@@ -385,7 +416,7 @@ void draw_node(struct Node* node, struct Buffer* constant_buffer, struct Device*
 
     for (size_t i = 0; i < node->child_count; i++)
     {
-        draw_node(node->child_array[i], constant_buffer, device, command_list, world_to_clip);
+        draw_node(node->child_array[i], device, command_list);
     }
 }
 
@@ -525,10 +556,14 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     struct Pipeline_State_Object* pipeline_state_object = 0;
     device_create_pipeline_state_object(device, pipeline_state_object_descriptor, &pipeline_state_object);
 
-    struct Buffer* constant_buffer = 0;
+    struct Camera_Constant
+    {
+        Mat4 world_to_clip;
+    };
+    struct Buffer* camera_constant_buffer = 0;
     {
         struct Buffer_Descriptor buffer_description = {
-            .width = sizeof(struct Constant),
+            .width = sizeof(struct Camera_Constant),
             .height = 1,
             .descriptor_sets = {
                 cbv_srv_uav_descriptor_set
@@ -540,10 +575,10 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             },
             .bind_types_count = 1
         };
-        device_create_buffer(device, buffer_description, &constant_buffer);
+        device_create_buffer(device, buffer_description, &camera_constant_buffer);
     }
     
-    struct Node* scene_node = load_fbx("Knight_USD_002.fbx");
+    struct Node* scene_node = load_fbx("Sponza.fbx");
     scene_node->position = V3(0.0f, 0.0f, 10.0f);
     scene_node->scale = V3(0.01f, 0.01f, 0.01f);
 
@@ -630,7 +665,18 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
         camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
         Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
-        draw_node(scene_node, constant_buffer, device, command_list, MulM4(camera_projection, InvGeneralM4(camera_transform)));
+        struct Upload_Buffer* constant_upload_buffer = 0;
+        {
+            struct Camera_Constant constant = { 
+                .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform))
+            };
+            device_create_upload_buffer(device, &constant, sizeof(struct Camera_Constant), &constant_upload_buffer);
+        }
+        command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, camera_constant_buffer);
+        upload_buffer_destroy(constant_upload_buffer);
+        
+        command_list_set_constant_buffer(command_list, camera_constant_buffer, 1);
+        draw_node(scene_node, device, command_list);
         
         command_list_set_buffer_state(command_list, backbuffer, RESOURCE_STATE_PRESENT);
         command_list_close(command_list);

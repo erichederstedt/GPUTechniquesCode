@@ -16,10 +16,14 @@ struct vs_out
 cbuffer model_cbuffer : register(b0)
 {
     float4x4 model_to_world;
-    float4x4 world_to_clip;
-} 
+}
 
-[RootSignature("RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), CBV(b0)")]
+cbuffer camera_cbuffer : register(b1)
+{
+    float4x4 world_to_clip;
+}
+
+[RootSignature("RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), CBV(b0), CBV(b1)")]
 vs_out VSMain(vs_in In)
 {
     vs_out Out;
