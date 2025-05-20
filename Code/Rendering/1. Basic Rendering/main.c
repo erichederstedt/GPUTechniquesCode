@@ -104,7 +104,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         Vec4 color;
     };
     #pragma pack(pop)
-    struct Input_Element_Descriptor input_element_descriptors[2] = {
+    struct Input_Element_Descriptor input_element_descriptors[] = {
         {
             .element_binding.name = "POS",
             .format = FORMAT_R32G32B32_FLOAT,
@@ -129,7 +129,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         .depth_stencil_descriptor.depth_enable = FALSE,
         .depth_stencil_descriptor.stencil_enable = FALSE,
         .input_element_descriptors = input_element_descriptors,
-        .input_element_descriptors_count = 2,
+        .input_element_descriptors_count = ARRAYSIZE(input_element_descriptors),
         .primitive_topology_type = PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
         .render_target_count = 1,
         .render_target_formats[0] = swapchain_descriptor.format,

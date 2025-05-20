@@ -2,6 +2,8 @@ struct vs_in
 {
     float3 pos : POS;
     float4 color : COL;
+    float3 normal : NORMAL;
+    float2 uv : UV;
 };
 
 struct vs_out

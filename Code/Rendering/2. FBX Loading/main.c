@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <limits.h>
+#include <stdlib.h>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -9,6 +10,7 @@
 
 #include "util.h"
 #include "HandmadeMath.h"
+#include "ufbx.h"
 
 static int DoneRunning;
 
@@ -54,6 +56,339 @@ LRESULT CALLBACK WindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM
     return Result;
 }
 
+enum NODE_TYPE 
+{
+    NODE_TYPE_EMPTY,
+    NODE_TYPE_MESH,
+    NODE_TYPE_LIGHT_POINT,
+    NODE_TYPE_LIGHT_SPOT,
+    NODE_TYPE_LIGHT_DIRECTIONAL,
+};
+struct Node
+{
+    enum NODE_TYPE type;
+    union 
+    {
+        struct 
+        {
+            struct Mesh_Part* mesh_parts;
+            size_t mesh_parts_count;
+        } mesh;
+        struct 
+        {
+            Vec3 color;
+            float range;
+        } light_point;
+        struct 
+        {
+            Vec3 color;
+            float range;
+            float angle;
+        } light_spot;
+        struct 
+        {
+            Vec3 color;
+        } light_directional;
+    };
+
+    char* name;
+    Vec3 position;
+    Quat rotation;
+    Vec3 scale;
+    struct Node* parent;
+    struct Node** child_array;
+    size_t child_count;
+};
+struct Node* node_create()
+{
+    struct Node* node = calloc(sizeof(struct Node), 1);
+    return node;
+}
+void node_append_child(struct Node* node, struct Node* child);
+Mat4 node_local_transform(struct Node* node)
+{
+    Mat4 translation = Translate(node->position);
+    Mat4 rotation = QToM4(node->rotation);
+    Mat4 scale = Scale(node->scale);
+    return MulM4(translation, MulM4(rotation, scale));
+}
+Mat4 node_global_transform(struct Node* node)
+{
+    Mat4 parent = M4D(1.0f);
+    if (node->parent)
+    {
+        parent = node_global_transform(node->parent);
+    }
+    
+    return MulM4(parent, node_local_transform(node));
+}
+
+#define conv_float(in, out) for (size_t conv_i = 0; conv_i < ARRAYSIZE(in.v); conv_i++) { out.Elements[conv_i] = (float)in.v[conv_i]; }
+#define conv_double(in, out) for (size_t conv_i = 0; conv_i < ARRAYSIZE(in.v); conv_i++) { out.Elements[conv_i] = (double)in.v[conv_i]; }
+
+#pragma pack(push, 1)
+struct Vertex 
+{
+    Vec3 pos;
+    Vec4 color;
+    Vec3 normal;
+    Vec2 uv;
+};
+#pragma pack(pop)
+struct Mesh_Part
+{
+    struct Vertex* vertex_array;
+    size_t vertex_count;
+
+    unsigned int* index_array;
+    size_t index_count;
+
+    struct Buffer* vertex_buffer;
+    struct Buffer* index_buffer;
+};
+struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
+{
+    size_t num_triangles = part->num_triangles;
+    struct Vertex *vertices = calloc(num_triangles * 3, sizeof(struct Vertex));
+    size_t num_vertices = 0;
+
+    // Reserve space for the maximum triangle indices.
+    size_t num_tri_indices = mesh->max_face_triangles * 3;
+    uint32_t *tri_indices = calloc(num_tri_indices, sizeof(uint32_t));
+
+    // Iterate over each face using the specific material.
+    for (size_t face_ix = 0; face_ix < part->num_faces; face_ix++) 
+    {
+        ufbx_face face = mesh->faces.data[part->face_indices.data[face_ix]];
+
+        // Triangulate the face into `tri_indices[]`.
+        uint32_t num_tris = ufbx_triangulate_face(tri_indices, num_tri_indices, mesh, face);
+
+        // Iterate over each triangle corner contiguously.
+        for (size_t i = 0; i < num_tris * 3; i++) 
+        {
+            uint32_t index = tri_indices[i];
+
+            struct Vertex *v = &vertices[num_vertices++];
+            if (mesh->vertex_position.exists)
+            {
+                ufbx_vec3 pos = ufbx_get_vertex_vec3(&mesh->vertex_position, index);
+                conv_float(pos, v->pos);
+            }
+            if (mesh->vertex_color.exists)
+            {
+                ufbx_vec4 color = ufbx_get_vertex_vec4(&mesh->vertex_color, index);
+                conv_float(color, v->color);
+            }
+            else
+            {
+                v->color = V4(1.0f, 1.0f, 1.0f, 1.0f);
+            }
+            if (mesh->vertex_normal.exists)
+            {
+                ufbx_vec3 normal = ufbx_get_vertex_vec3(&mesh->vertex_normal, index);
+                conv_float(normal, v->normal);
+            }
+            if (mesh->vertex_uv.exists)
+            {
+                ufbx_vec2 uv = ufbx_get_vertex_vec2(&mesh->vertex_uv, index);
+                conv_float(uv, v->uv);
+            }
+        }
+    }
+
+    // Should have written all the vertices.
+    free(tri_indices);
+    assert(num_vertices == num_triangles * 3);
+
+    // Generate the index buffer.
+    ufbx_vertex_stream streams[1] = {
+        { vertices, num_vertices, sizeof(struct Vertex) },
+    };
+    size_t num_indices = num_triangles * 3;
+    uint32_t *indices = calloc(num_indices, sizeof(uint32_t));
+
+    // This call will deduplicate vertices, modifying the arrays passed in `streams[]`,
+    // indices are written in `indices[]` and the number of unique vertices is returned.
+    num_vertices = ufbx_generate_indices(streams, 1, indices, num_indices, NULL, NULL);
+
+    // create_vertex_buffer(vertices, num_vertices);
+    // create_index_buffer(indices, num_indices);
+
+    struct Mesh_Part mesh_part = {0};
+    mesh_part.index_array = indices;
+    mesh_part.index_count = num_indices;
+    mesh_part.vertex_array = vertices;
+    mesh_part.vertex_count = num_vertices;
+
+    // free(indices);
+    // free(vertices);
+
+    return mesh_part;
+}
+struct Node* load_node(ufbx_node* fbx_node)
+{
+    printf("Object: %s\n", fbx_node->name.data);
+
+    struct Node* node = node_create();
+    node->name = calloc(sizeof(char), fbx_node->name.length+1);
+    strcpy(node->name, fbx_node->name.data);
+    
+    conv_float(fbx_node->local_transform.translation, node->position);
+    conv_float(fbx_node->local_transform.rotation, node->rotation);
+    conv_float(fbx_node->local_transform.scale, node->scale);
+
+    if (fbx_node->mesh)
+    {
+        ufbx_mesh* mesh = fbx_node->mesh;
+        printf("-> mesh with %zu faces\n", mesh->faces.count);
+        node->type = NODE_TYPE_MESH;
+        node->mesh.mesh_parts_count = mesh->material_parts.count;
+        node->mesh.mesh_parts = calloc(mesh->material_parts.count, sizeof(struct Mesh_Part));
+        for (size_t i = 0; i < mesh->material_parts.count; i++)
+        {
+            node->mesh.mesh_parts[i] = load_mesh_part(mesh, &mesh->material_parts.data[i]);
+        }
+        
+    }
+    else if (fbx_node->light && fbx_node->light->type == UFBX_LIGHT_POINT) {}
+    else if (fbx_node->light && fbx_node->light->type == UFBX_LIGHT_SPOT) {}
+    else if (fbx_node->light && fbx_node->light->type == UFBX_LIGHT_DIRECTIONAL) {}
+    else 
+    {
+
+    }
+
+    node->child_array = calloc(fbx_node->children.count, sizeof(struct Node*));
+    node->child_count = fbx_node->children.count;
+    for (size_t i = 0; i < fbx_node->children.count; i++) 
+    {
+        node->child_array[i] = load_node(fbx_node->children.data[i]);
+        node->child_array[i]->parent = node;
+    }
+
+    return node;
+}
+struct Node* load_fbx(char* path)
+{
+    ufbx_load_opts opts = { 0 };
+    ufbx_error error;
+    ufbx_scene *fbx_scene = ufbx_load_file(path, &opts, &error);
+    if (!fbx_scene)
+    {
+        fprintf(stderr, "Failed to load: %s\n", error.description.data);
+        exit(1);
+    }
+
+    struct Node* scene = load_node(fbx_scene->root_node);
+
+    ufbx_free_scene(fbx_scene);
+    return scene;
+}
+
+void upload_node_buffers(struct Node* node, struct Device* device, struct Command_List* upload_command_list, struct Descriptor_Set* cbv_srv_uav_descriptor_set)
+{
+    if (node->type == NODE_TYPE_MESH)
+    {
+        for (size_t i = 0; i < node->mesh.mesh_parts_count; i++)
+        {
+            struct Mesh_Part* mesh_part = &node->mesh.mesh_parts[i];
+
+            struct Vertex* vertex_array = mesh_part->vertex_array;
+            size_t vertex_count = mesh_part->vertex_count;
+            unsigned int* index_array = mesh_part->index_array;
+            size_t index_count = mesh_part->index_count;
+
+            if (vertex_count == 0 || index_count == 0)
+                continue;
+
+            struct Upload_Buffer* vertex_upload_buffer = 0;
+            device_create_upload_buffer(device, vertex_array, sizeof(struct Vertex) * vertex_count, &vertex_upload_buffer);
+            {
+                struct Buffer_Descriptor buffer_description = {
+                    .width = sizeof(struct Vertex) * vertex_count,
+                    .height = 1,
+                    .descriptor_sets = {
+                        cbv_srv_uav_descriptor_set
+                    },
+                    .descriptor_sets_count = 1,
+                    .buffer_type = BUFFER_TYPE_BUFFER,
+                    .bind_types = {
+                        BIND_TYPE_SRV
+                    },
+                    .bind_types_count = 1
+                };
+                device_create_buffer(device, buffer_description, &mesh_part->vertex_buffer);
+            }
+
+            struct Upload_Buffer* index_upload_buffer = 0;
+            device_create_upload_buffer(device, index_array, sizeof(unsigned int) * index_count, &index_upload_buffer);   
+            {
+                struct Buffer_Descriptor buffer_description = {
+                    .width = sizeof(unsigned int) * index_count,
+                    .height = 1,
+                    .descriptor_sets = {
+                        cbv_srv_uav_descriptor_set
+                    },
+                    .descriptor_sets_count = 1,
+                    .buffer_type = BUFFER_TYPE_BUFFER,
+                    .bind_types = {
+                        BIND_TYPE_SRV
+                    },
+                    .bind_types_count = 1
+                };
+                device_create_buffer(device, buffer_description, &mesh_part->index_buffer);
+            }
+
+            command_list_copy_upload_buffer_to_buffer(upload_command_list, vertex_upload_buffer, mesh_part->vertex_buffer);
+            command_list_copy_upload_buffer_to_buffer(upload_command_list, index_upload_buffer, mesh_part->index_buffer);
+        }
+    }
+
+    for (size_t i = 0; i < node->child_count; i++)
+    {
+        upload_node_buffers(node->child_array[i], device, upload_command_list, cbv_srv_uav_descriptor_set);
+    }
+}
+
+struct Constant
+{
+    Mat4 model_to_world;
+    Mat4 world_to_clip;
+};
+void draw_node(struct Node* node, struct Buffer* constant_buffer, struct Device* device, struct Command_List* command_list, Mat4 world_to_clip)
+{
+    if (node->type == NODE_TYPE_MESH)
+    {
+        struct Upload_Buffer* constant_upload_buffer = 0;
+        {
+            struct Constant constant = { 
+                .model_to_world = node_global_transform(node),
+                .world_to_clip = world_to_clip
+            };
+            device_create_upload_buffer(device, &constant, sizeof(struct Constant), &constant_upload_buffer);
+        }
+        for (size_t i = 0; i < node->mesh.mesh_parts_count; i++)
+        {
+            struct Mesh_Part* mesh_part = &node->mesh.mesh_parts[i];
+            if (mesh_part->vertex_count == 0 || mesh_part->index_count == 0)
+                continue;
+
+            command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
+            command_list_set_constant_buffer(command_list, constant_buffer, 0);
+            command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            command_list_set_vertex_buffer(command_list, mesh_part->vertex_buffer, sizeof(struct Vertex) * mesh_part->vertex_count, sizeof(struct Vertex));
+            command_list_set_index_buffer(command_list, mesh_part->index_buffer, sizeof(unsigned int) * mesh_part->index_count, FORMAT_R32_UINT);
+            command_list_draw_indexed_instanced(command_list, mesh_part->index_count, 1, 0, 0, 0);
+        }
+    }
+
+    for (size_t i = 0; i < node->child_count; i++)
+    {
+        draw_node(node->child_array[i], constant_buffer, device, command_list, world_to_clip);
+    }
+}
+
 int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
 {
     SetCpuAndThreadPriority();
@@ -97,14 +432,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     struct Shader* shader = 0;
     device_create_shader(device, &shader);
 
-    #pragma pack(push, 1)
-    struct Vertex 
-    {
-        Vec3 pos;
-        Vec4 color;
-    };
-    #pragma pack(pop)
-    struct Input_Element_Descriptor input_element_descriptors[2] = {
+    struct Input_Element_Descriptor input_element_descriptors[] = {
         {
             .element_binding.name = "POS",
             .format = FORMAT_R32G32B32_FLOAT,
@@ -115,6 +443,18 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             .format = FORMAT_R32G32B32A32_FLOAT,
             .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
             .offset = offsetof(struct Vertex, color)
+        },
+        {
+            .element_binding.name = "NORMAL",
+            .format = FORMAT_R32G32B32_FLOAT,
+            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
+            .offset = offsetof(struct Vertex, normal)
+        },
+        {
+            .element_binding.name = "UV",
+            .format = FORMAT_R32G32_FLOAT,
+            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
+            .offset = offsetof(struct Vertex, uv)
         },
     };
     struct Swapchain_Descriptor swapchain_descriptor = swapchain_get_descriptor(swapchain);
@@ -129,7 +469,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         .depth_stencil_descriptor.depth_enable = FALSE,
         .depth_stencil_descriptor.stencil_enable = FALSE,
         .input_element_descriptors = input_element_descriptors,
-        .input_element_descriptors_count = 2,
+        .input_element_descriptors_count = ARRAYSIZE(input_element_descriptors),
         .primitive_topology_type = PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
         .render_target_count = 1,
         .render_target_formats[0] = swapchain_descriptor.format,
@@ -198,11 +538,6 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_buffer(device, buffer_description, &index_buffer);
     }
 
-    struct Constant
-    {
-        Mat4 model_to_world;
-        Mat4 world_to_clip;
-    };
     struct Buffer* constant_buffer = 0;
     {
         struct Buffer_Descriptor buffer_description = {
@@ -220,7 +555,11 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         };
         device_create_buffer(device, buffer_description, &constant_buffer);
     }
-        
+    
+    struct Node* scene_node = load_fbx("Knight_USD_002.fbx");
+    scene_node->position = V3(0.0f, 0.0f, 10.0f);
+    scene_node->scale = V3(0.01f, 0.01f, 0.01f);
+
     {
         struct Command_List* upload_command_list = 0;
         device_create_command_list(device, &upload_command_list);
@@ -229,6 +568,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
 
         command_list_copy_upload_buffer_to_buffer(upload_command_list, vertex_upload_buffer, vertex_buffer);
         command_list_copy_upload_buffer_to_buffer(upload_command_list, index_upload_buffer, index_buffer);
+
+        upload_node_buffers(scene_node, device, upload_command_list, cbv_srv_uav_descriptor_set);
 
         command_list_close(upload_command_list);
 
@@ -289,6 +630,15 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             .bottom = (long)backbuffer_description.height,
         };
 
+        command_list_set_pipeline_state_object(command_list, pipeline_state_object);
+        command_list_set_shader(command_list, shader);
+        command_list_set_viewport(command_list, viewport);
+        command_list_set_scissor_rect(command_list, scissor_rect);
+        command_list_set_render_targets(command_list, &backbuffer, 1, 0);
+        float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+        command_list_clear_render_target(command_list, backbuffer, clear_color);
+        
+        /*
         struct Upload_Buffer* constant_upload_buffer = 0;
         {
             Mat4 camera_translation = Translate(camera_position);
@@ -303,27 +653,25 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             device_create_upload_buffer(device, &constant, sizeof(struct Constant), &constant_upload_buffer);
         }
         command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
-        
-        command_list_set_pipeline_state_object(command_list, pipeline_state_object);
-        command_list_set_shader(command_list, shader);
-        command_list_set_viewport(command_list, viewport);
-        command_list_set_scissor_rect(command_list, scissor_rect);
-        
-        command_list_set_render_targets(command_list, &backbuffer, 1, 0);
-        float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
-        command_list_clear_render_target(command_list, backbuffer, clear_color);
-        command_list_set_vertex_buffer(command_list, vertex_buffer, sizeof(vertices), sizeof(struct Vertex));
-        command_list_set_index_buffer(command_list, index_buffer, sizeof(indices), FORMAT_R32_UINT);
         command_list_set_constant_buffer(command_list, constant_buffer, 0);
         command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        command_list_set_vertex_buffer(command_list, vertex_buffer, sizeof(vertices), sizeof(struct Vertex));
+        command_list_set_index_buffer(command_list, index_buffer, sizeof(indices), FORMAT_R32_UINT);
         command_list_draw_indexed_instanced(command_list, 3, 1, 0, 0, 0);
+        */
+        Mat4 camera_translation = Translate(camera_position);
+        Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
+        Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
+        camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
+        Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
+        draw_node(scene_node, constant_buffer, device, command_list, MulM4(camera_projection, InvGeneralM4(camera_transform)));
         
         command_list_set_buffer_state(command_list, backbuffer, RESOURCE_STATE_PRESENT);
         command_list_close(command_list);
 
         command_queue_execute(command_queue, &command_list, 1);
 
-        upload_buffer_destroy(constant_upload_buffer);
+        // upload_buffer_destroy(constant_upload_buffer);
         
         swapchain_present(swapchain);
         

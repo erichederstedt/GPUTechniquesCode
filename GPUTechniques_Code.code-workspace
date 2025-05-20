@@ -4,7 +4,17 @@
 			"path": "."
 		}
 	],
-	"settings": {},
+	"settings": {
+		"files.associations": {
+			"*.json": "jsonc",
+			"iterator": "c",
+			"xmemory": "c",
+			"algorithm": "c",
+			"format": "c",
+			"xiosbase": "c",
+			"xutility": "c"
+		}
+	},
 	"launch": {
 		"version": "0.2.0",
 		"configurations": []
