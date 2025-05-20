@@ -426,8 +426,34 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     struct Descriptor_Set* cbv_srv_uav_descriptor_set = 0;
     device_create_descriptor_set(device, DESCRIPTOR_TYPE_CBV_SRV_UAV, 2048, &cbv_srv_uav_descriptor_set);
 
-    struct Buffer** backbuffers = _alloca(sizeof(struct Buffer*) * swapchain_get_descriptor(swapchain).backbuffer_count);
+    struct Descriptor_Set* dsv_descriptor_set = 0;
+    device_create_descriptor_set(device, DESCRIPTOR_TYPE_DSV, 2048, &dsv_descriptor_set);
+
+    struct Swapchain_Descriptor swapchain_descriptor = swapchain_get_descriptor(swapchain);
+    struct Buffer** backbuffers = _alloca(sizeof(struct Buffer*) * swapchain_descriptor.backbuffer_count);
     swapchain_create_backbuffers(swapchain, device, rtv_descriptor_set, backbuffers);
+
+    struct Buffer** depth_buffers = _alloca(sizeof(struct Buffer*) * swapchain_descriptor.backbuffer_count);
+    for (size_t i = 0; i < swapchain_descriptor.backbuffer_count; i++)
+    {
+        struct Buffer* depth_buffer = 0;
+        struct Buffer_Descriptor buffer_description = {
+            .width = swapchain_descriptor.width,
+            .height = swapchain_descriptor.height,
+            .descriptor_sets = {
+                dsv_descriptor_set
+            },
+            .descriptor_sets_count = 1,
+            .buffer_type = BUFFER_TYPE_TEXTRUE2D,
+            .bind_types = {
+                BIND_TYPE_DSV
+            },
+            .bind_types_count = 1,
+            .format = FORMAT_D24_UNORM_S8_UINT
+        };
+        device_create_buffer(device, buffer_description, &depth_buffer);
+        depth_buffers[i] = depth_buffer;
+    }
     
     struct Shader* shader = 0;
     device_create_shader(device, &shader);
@@ -457,17 +483,26 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             .offset = offsetof(struct Vertex, uv)
         },
     };
-    struct Swapchain_Descriptor swapchain_descriptor = swapchain_get_descriptor(swapchain);
     struct Pipeline_State_Object_Descriptor pipeline_state_object_descriptor = {
         .shader = shader,
-        .blend_descriptor.alpha_to_coverage_enable = FALSE,
-        .blend_descriptor.independent_blend_enable = FALSE,
+        .blend_descriptor.alpha_to_coverage_enable = 0,
+        .blend_descriptor.independent_blend_enable = 0,
         .sample_mask = UINT_MAX,
         .rasterizer_descriptor.fill_mode = FILL_MODE_SOLID,
         .rasterizer_descriptor.cull_mode = CULL_MODE_BACK,
-        .rasterizer_descriptor.front_counter_clockwise = TRUE,
-        .depth_stencil_descriptor.depth_enable = FALSE,
-        .depth_stencil_descriptor.stencil_enable = FALSE,
+        .rasterizer_descriptor.front_counter_clockwise = 0,
+        .depth_stencil_descriptor.stencil_enable = 0,
+        .depth_stencil_descriptor.depth_enable = 1,
+        .depth_stencil_descriptor.depth_func = COMPARISON_FUNC_LESS,
+        .depth_stencil_descriptor.depth_write_mask = DEPTH_WRITE_MASK_ALL,
+        .depth_stencil_descriptor.front_face_op.stencil_func = COMPARISON_FUNC_ALWAYS,
+        .depth_stencil_descriptor.front_face_op.stencil_depth_fail_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.front_face_op.stencil_fail_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.front_face_op.stencil_pass_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.back_face_op.stencil_func = COMPARISON_FUNC_ALWAYS,
+        .depth_stencil_descriptor.back_face_op.stencil_depth_fail_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.back_face_op.stencil_fail_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.back_face_op.stencil_pass_op = STENCIL_OP_KEEP,
         .input_element_descriptors = input_element_descriptors,
         .input_element_descriptors_count = ARRAYSIZE(input_element_descriptors),
         .primitive_topology_type = PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
@@ -482,61 +517,13 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     for (int i = 0; i < 8; ++i)
     {
         pipeline_state_object_descriptor.blend_descriptor.render_target_blend_descriptors[i] = (struct Render_Target_Blend_Descriptor){
-            .blend_enable = FALSE,
-            .logic_op_enable = FALSE,
+            .blend_enable = 0,
+            .logic_op_enable = 0,
             .render_target_write_mask = COLOR_WRITE_ENABLE_ALL
         };
     }
     struct Pipeline_State_Object* pipeline_state_object = 0;
     device_create_pipeline_state_object(device, pipeline_state_object_descriptor, &pipeline_state_object);
-
-    struct Vertex vertices[] = {
-        {.pos = { 0.0f, 0.7f, 0.0f },   .color = { 1.0f, 0.0f, 0.0f, 1.0f }},
-        {.pos = { -0.4f, -0.5f, 0.0f }, .color = { 0.0f, 1.0f, 0.0f, 1.0f }},
-        {.pos = { 0.4f, -0.5f, 0.0f },  .color = { 0.0f, 0.0f, 1.0f, 1.0f }},
-    };
-    struct Upload_Buffer* vertex_upload_buffer = 0;
-    device_create_upload_buffer(device, vertices, sizeof(vertices), &vertex_upload_buffer);
-    struct Buffer* vertex_buffer = 0;
-    {
-        struct Buffer_Descriptor buffer_description = {
-            .width = sizeof(vertices),
-            .height = 1,
-            .descriptor_sets = {
-                cbv_srv_uav_descriptor_set
-            },
-            .descriptor_sets_count = 1,
-            .buffer_type = BUFFER_TYPE_BUFFER,
-            .bind_types = {
-                BIND_TYPE_SRV
-            },
-            .bind_types_count = 1
-        };
-        device_create_buffer(device, buffer_description, &vertex_buffer);
-    }
-
-    unsigned int indices[] = {
-        0, 1, 2
-    };  
-    struct Upload_Buffer* index_upload_buffer = 0;
-    device_create_upload_buffer(device, indices, sizeof(indices), &index_upload_buffer);   
-    struct Buffer* index_buffer = 0;
-    {
-        struct Buffer_Descriptor buffer_description = {
-            .width = sizeof(indices),
-            .height = 1,
-            .descriptor_sets = {
-                cbv_srv_uav_descriptor_set
-            },
-            .descriptor_sets_count = 1,
-            .buffer_type = BUFFER_TYPE_BUFFER,
-            .bind_types = {
-                BIND_TYPE_SRV
-            },
-            .bind_types_count = 1
-        };
-        device_create_buffer(device, buffer_description, &index_buffer);
-    }
 
     struct Buffer* constant_buffer = 0;
     {
@@ -565,9 +552,6 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_command_list(device, &upload_command_list);
 
         command_list_reset(upload_command_list);
-
-        command_list_copy_upload_buffer_to_buffer(upload_command_list, vertex_upload_buffer, vertex_buffer);
-        command_list_copy_upload_buffer_to_buffer(upload_command_list, index_upload_buffer, index_buffer);
 
         upload_node_buffers(scene_node, device, upload_command_list, cbv_srv_uav_descriptor_set);
 
@@ -616,6 +600,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_reset(command_list);
         
         struct Buffer* backbuffer = backbuffers[backbuffer_index];
+        struct Buffer* depth_buffer = depth_buffers[backbuffer_index];
         struct Buffer_Descriptor backbuffer_description = buffer_get_descriptor(backbuffer);
 
         struct Viewport viewport = {
@@ -630,35 +615,16 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             .bottom = (long)backbuffer_description.height,
         };
 
+        float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+        command_list_clear_render_target(command_list, backbuffer, clear_color);
+        command_list_clear_depth_target(command_list, depth_buffer, 1.0f, 0, 0);
+
         command_list_set_pipeline_state_object(command_list, pipeline_state_object);
         command_list_set_shader(command_list, shader);
         command_list_set_viewport(command_list, viewport);
         command_list_set_scissor_rect(command_list, scissor_rect);
-        command_list_set_render_targets(command_list, &backbuffer, 1, 0);
-        float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
-        command_list_clear_render_target(command_list, backbuffer, clear_color);
+        command_list_set_render_targets(command_list, &backbuffer, 1, depth_buffer);
         
-        /*
-        struct Upload_Buffer* constant_upload_buffer = 0;
-        {
-            Mat4 camera_translation = Translate(camera_position);
-            Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
-            Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
-            camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
-            Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
-            struct Constant constant = { 
-                .model_to_world = M4D(1.0f),
-                .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform))
-            };
-            device_create_upload_buffer(device, &constant, sizeof(struct Constant), &constant_upload_buffer);
-        }
-        command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
-        command_list_set_constant_buffer(command_list, constant_buffer, 0);
-        command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        command_list_set_vertex_buffer(command_list, vertex_buffer, sizeof(vertices), sizeof(struct Vertex));
-        command_list_set_index_buffer(command_list, index_buffer, sizeof(indices), FORMAT_R32_UINT);
-        command_list_draw_indexed_instanced(command_list, 3, 1, 0, 0, 0);
-        */
         Mat4 camera_translation = Translate(camera_position);
         Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
         Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
@@ -670,12 +636,9 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_close(command_list);
 
         command_queue_execute(command_queue, &command_list, 1);
-
-        // upload_buffer_destroy(constant_upload_buffer);
         
         swapchain_present(swapchain);
         
-        // Sleep(2);
         frame_counter++;
 
         unsigned long long timestamp2 = GetRdtsc();
