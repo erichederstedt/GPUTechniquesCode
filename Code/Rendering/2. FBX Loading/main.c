@@ -361,20 +361,20 @@ void draw_node(struct Node* node, struct Buffer* constant_buffer, struct Device*
     if (node->type == NODE_TYPE_MESH)
     {
         struct Upload_Buffer* constant_upload_buffer = 0;
-        {
-            struct Constant constant = { 
-                .model_to_world = node_global_transform(node),
-                .world_to_clip = world_to_clip
-            };
-            device_create_upload_buffer(device, &constant, sizeof(struct Constant), &constant_upload_buffer);
-        }
+        struct Constant constant = { 
+            .model_to_world = node_global_transform(node),
+            .world_to_clip = world_to_clip
+        };
+        device_create_upload_buffer(device, &constant, sizeof(struct Constant), &constant_upload_buffer);
+        command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
+        upload_buffer_destroy(constant_upload_buffer);
+
         for (size_t i = 0; i < node->mesh.mesh_parts_count; i++)
         {
             struct Mesh_Part* mesh_part = &node->mesh.mesh_parts[i];
             if (mesh_part->vertex_count == 0 || mesh_part->index_count == 0)
                 continue;
 
-            command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
             command_list_set_constant_buffer(command_list, constant_buffer, 0);
             command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             command_list_set_vertex_buffer(command_list, mesh_part->vertex_buffer, sizeof(struct Vertex) * mesh_part->vertex_count, sizeof(struct Vertex));
