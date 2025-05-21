@@ -1,0 +1,1 @@
+Sponza.fbx: https://github.com/TheRealMJP/DeferredTexturing/tree/master/Content/Models/Sponza

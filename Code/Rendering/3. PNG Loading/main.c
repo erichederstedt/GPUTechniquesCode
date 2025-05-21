@@ -577,7 +577,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_buffer(device, buffer_description, &camera_constant_buffer);
     }
     
-    struct Node* scene_node = load_fbx("Knight_USD_002.fbx");
+    struct Node* scene_node = load_fbx("Sponza.fbx");
     scene_node->position = V3(0.0f, 0.0f, 10.0f);
     scene_node->scale = V3(0.01f, 0.01f, 0.01f);
 
