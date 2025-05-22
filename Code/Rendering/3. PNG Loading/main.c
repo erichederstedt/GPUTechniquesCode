@@ -70,6 +70,7 @@ enum NODE_TYPE
     NODE_TYPE_LIGHT_POINT,
     NODE_TYPE_LIGHT_SPOT,
     NODE_TYPE_LIGHT_DIRECTIONAL,
+    NODE_TYPE_CAMERA,
 };
 struct Node
 {
@@ -114,7 +115,21 @@ struct Node* node_create()
     struct Node* node = calloc(sizeof(struct Node), 1);
     return node;
 }
-void node_append_child(struct Node* node, struct Node* child);
+struct Node* node_search_type(struct Node* search_node, enum NODE_TYPE type)
+{
+    if (search_node->type == type)
+        return search_node;
+    
+    for (size_t i = 0; i < search_node->child_count; i++)
+    {
+        struct Node* node = node_search_type(search_node->child_array[i], type);
+
+        if (node)
+            return node;
+    }
+    
+    return 0;
+}
 Mat4 node_local_transform(struct Node* node)
 {
     Mat4 translation = Translate(node->position);
@@ -157,8 +172,10 @@ struct Mesh_Part
     struct Buffer* index_buffer;
 
     struct Buffer* constant_buffer;
+
+    struct Texture* color_texture;
 };
-struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
+struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part, size_t material_index, struct Node* node)
 {
     size_t num_triangles = part->num_triangles;
     struct Vertex *vertices = calloc(num_triangles * 3, sizeof(struct Vertex));
@@ -222,9 +239,18 @@ struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
     mesh_part.vertex_array = vertices;
     mesh_part.vertex_count = num_vertices;
 
+    mesh->materials.data[0]->pbr.base_color.texture;
+    for (size_t i = 0; i < node->texture_count; i++)
+    {
+        if (mesh->materials.data[material_index]->pbr.base_color.texture && strcmp(mesh->materials.data[material_index]->pbr.base_color.texture->filename.data, node->texture_array[i].path) == 0)
+        {
+            mesh_part.color_texture = &node->texture_array[i];
+        }
+    }
+
     return mesh_part;
 }
-struct Node* load_node(ufbx_node* fbx_node, ufbx_scene* fbx_scene)
+struct Node* load_node(ufbx_node* fbx_node, struct Node* root, ufbx_scene* fbx_scene)
 {
     printf("Object: %s\n", fbx_node->name.data);
 
@@ -236,6 +262,8 @@ struct Node* load_node(ufbx_node* fbx_node, ufbx_scene* fbx_scene)
     conv_float(fbx_node->local_transform.rotation, node->rotation);
     conv_float(fbx_node->local_transform.scale, node->scale);
 
+    fbx_node->local_transform.rotation;
+
     if (fbx_node->mesh)
     {
         ufbx_mesh* mesh = fbx_node->mesh;
@@ -243,20 +271,27 @@ struct Node* load_node(ufbx_node* fbx_node, ufbx_scene* fbx_scene)
         node->type = NODE_TYPE_MESH;
         node->mesh.mesh_parts_count = mesh->material_parts.count;
         node->mesh.mesh_parts = calloc(mesh->material_parts.count, sizeof(struct Mesh_Part));
+
         for (size_t i = 0; i < mesh->material_parts.count; i++)
         {
-            node->mesh.mesh_parts[i] = load_mesh_part(mesh, &mesh->material_parts.data[i]);
+            node->mesh.mesh_parts[i] = load_mesh_part(mesh, &mesh->material_parts.data[i], i, root);
         }
     }
     else if (fbx_node->light && fbx_node->light->type == UFBX_LIGHT_POINT) {}
     else if (fbx_node->light && fbx_node->light->type == UFBX_LIGHT_SPOT) {}
     else if (fbx_node->light && fbx_node->light->type == UFBX_LIGHT_DIRECTIONAL) {}
+    else if (fbx_node->camera) 
+    {
+        node->type = NODE_TYPE_CAMERA;
+    }
     else 
     {
         node->type = NODE_TYPE_EMPTY;
 
         if (fbx_node->is_root)
         {
+            root = node;
+
             node->texture_count = fbx_scene->textures.count;
             node->texture_array = calloc(node->texture_count, sizeof(struct Texture));
 
@@ -276,7 +311,7 @@ struct Node* load_node(ufbx_node* fbx_node, ufbx_scene* fbx_scene)
     node->child_count = fbx_node->children.count;
     for (size_t i = 0; i < fbx_node->children.count; i++) 
     {
-        node->child_array[i] = load_node(fbx_node->children.data[i], fbx_scene);
+        node->child_array[i] = load_node(fbx_node->children.data[i], root, fbx_scene);
         node->child_array[i]->parent = node;
         node->child_array[i]->texture_array = node->texture_array;
         node->child_array[i]->texture_count = node->texture_count;
@@ -295,7 +330,7 @@ struct Node* load_fbx(char* path)
         exit(1);
     }
 
-    struct Node* scene = load_node(fbx_scene->root_node, fbx_scene);
+    struct Node* scene = load_node(fbx_scene->root_node, 0, fbx_scene);
 
     ufbx_free_scene(fbx_scene);
     return scene;
@@ -408,6 +443,7 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
             struct Texture* texture = &node->texture_array[i];
             printf("Texture Path: %s\n", texture->path);
             
+            stbi_set_flip_vertically_on_load(1);
             int x;
             int y;
             int component_count;
@@ -463,6 +499,11 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
             };
             device_create_buffer(device, buffer_description, &texture->buffer);
 
+            D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
+            srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            ( (device->device)->lpVtbl -> CreateShaderResourceView(device->device,texture->buffer->resource,0, texture->buffer->handles[0].cpu_descriptor_handle) );
+
             wchar_t* w_path = calloc(strlen(texture->path)+1, sizeof(wchar_t));
             mbstowcs(w_path, texture->path, strlen(texture->path));
             ID3D12Resource_SetName(texture->buffer->resource, w_path);
@@ -471,6 +512,7 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
             device_create_upload_buffer(device, 0, (unsigned long long)(x * y * sizeof(unsigned char) * component_count), &texture_upload_buffer);
 
             void* mapped = upload_buffer_map(texture_upload_buffer); mapped;
+            
             if (component_count == 3)
                 memcpy(mapped, image_data, sizeof(unsigned char) * 4 * x * y);
             else
@@ -500,6 +542,8 @@ void draw_node(struct Node* node, struct Device* device, struct Command_List* co
                 continue;
 
             command_list_set_constant_buffer(command_list, mesh_part->constant_buffer, 0);
+            if (mesh_part->color_texture)
+                command_list_set_texture_buffer(command_list, mesh_part->color_texture->buffer, 2);
             command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             command_list_set_vertex_buffer(command_list, mesh_part->vertex_buffer, sizeof(struct Vertex) * mesh_part->vertex_count, sizeof(struct Vertex));
             command_list_set_index_buffer(command_list, mesh_part->index_buffer, sizeof(unsigned int) * mesh_part->index_count, FORMAT_R32_UINT);
@@ -511,6 +555,37 @@ void draw_node(struct Node* node, struct Device* device, struct Command_List* co
     {
         draw_node(node->child_array[i], device, command_list);
     }
+}
+
+Vec3 Mat4_ExtractEulerYXZ(const Mat4* m)
+{
+    Vec3 angles;
+
+    float m00 = m->Elements[0][0];
+    float m01 = m->Elements[0][1];
+    float m02 = m->Elements[0][2];
+    // float m10 = m->Elements[1][0];
+    float m11 = m->Elements[1][1];
+    // float m12 = m->Elements[1][2];
+    float m20 = m->Elements[2][0];
+    float m21 = m->Elements[2][1];
+    float m22 = m->Elements[2][2];
+
+    // Pitch (X-axis rotation)
+    angles.X = asinf(-m21);
+
+    if (fabsf(m21) < 0.9999f) {
+        // Yaw (Y-axis rotation)
+        angles.Y = atan2f(m20, m22);
+        // Roll (Z-axis rotation)
+        angles.Z = atan2f(m01, m11);
+    } else {
+        // Gimbal lock case
+        angles.Y = atan2f(-m02, m00);
+        angles.Z = 0.0f;
+    }
+
+    return angles;
 }
 
 int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
@@ -693,6 +768,20 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     float camera_pitch = 0.0f;
     Mat4 camera_transform = M4D(1.0f);
 
+    struct Node* camera_node = node_search_type(scene_node, NODE_TYPE_CAMERA);
+    if (camera_node)
+    {
+        Mat4 camera_node_transform = node_global_transform(camera_node);
+        camera_position.X = camera_node_transform.Elements[3][0];
+        camera_position.Y = camera_node_transform.Elements[3][1];
+        camera_position.Z = camera_node_transform.Elements[3][2];
+
+        Vec3 camera_rotation = Mat4_ExtractEulerYXZ(&camera_node_transform);
+        camera_yaw = camera_rotation.Y;
+        camera_pitch = camera_rotation.X;
+    }
+    
+    
     double frame_time = 0.0f;
     unsigned long long frame_counter = 0;
     while (!DoneRunning)
@@ -752,6 +841,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_set_viewport(command_list, viewport);
         command_list_set_scissor_rect(command_list, scissor_rect);
         command_list_set_render_targets(command_list, &backbuffer, 1, depth_buffer);
+        ID3D12GraphicsCommandList* cl = command_list->command_list_allocation->command_list;
+        cl->lpVtbl->SetDescriptorHeaps(cl, 1, &cbv_srv_uav_descriptor_set->descriptor_heap);
         
         Mat4 camera_translation = Translate(camera_position);
         Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
