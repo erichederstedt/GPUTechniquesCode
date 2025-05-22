@@ -179,7 +179,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         0, 1, 2
     };  
     struct Upload_Buffer* index_upload_buffer = 0;
-    device_create_upload_buffer(device, indices, sizeof(indices), &index_upload_buffer);   
+    device_create_upload_buffer(device, indices, sizeof(indices), &index_upload_buffer);
     struct Buffer* index_buffer = 0;
     {
         struct Buffer_Descriptor buffer_description = {

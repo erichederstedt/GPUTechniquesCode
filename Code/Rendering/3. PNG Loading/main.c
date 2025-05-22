@@ -11,6 +11,8 @@
 #include "util.h"
 #include "HandmadeMath.h"
 #include "ufbx.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 static int DoneRunning;
 
@@ -56,6 +58,11 @@ LRESULT CALLBACK WindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM
     return Result;
 }
 
+struct Texture
+{
+    char* path;
+    struct Buffer* buffer;
+};
 enum NODE_TYPE 
 {
     NODE_TYPE_EMPTY,
@@ -98,6 +105,9 @@ struct Node
     struct Node* parent;
     struct Node** child_array;
     size_t child_count;
+
+    struct Texture* texture_array;
+    size_t texture_count;
 };
 struct Node* node_create()
 {
@@ -154,19 +164,15 @@ struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
     struct Vertex *vertices = calloc(num_triangles * 3, sizeof(struct Vertex));
     size_t num_vertices = 0;
 
-    // Reserve space for the maximum triangle indices.
     size_t num_tri_indices = mesh->max_face_triangles * 3;
     uint32_t *tri_indices = calloc(num_tri_indices, sizeof(uint32_t));
 
-    // Iterate over each face using the specific material.
     for (size_t face_ix = 0; face_ix < part->num_faces; face_ix++) 
     {
         ufbx_face face = mesh->faces.data[part->face_indices.data[face_ix]];
 
-        // Triangulate the face into `tri_indices[]`.
         uint32_t num_tris = ufbx_triangulate_face(tri_indices, num_tri_indices, mesh, face);
 
-        // Iterate over each triangle corner contiguously.
         for (size_t i = 0; i < num_tris * 3; i++) 
         {
             uint32_t index = tri_indices[i];
@@ -199,23 +205,16 @@ struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
         }
     }
 
-    // Should have written all the vertices.
     free(tri_indices);
     assert(num_vertices == num_triangles * 3);
 
-    // Generate the index buffer.
     ufbx_vertex_stream streams[1] = {
         { vertices, num_vertices, sizeof(struct Vertex) },
     };
     size_t num_indices = num_triangles * 3;
     uint32_t *indices = calloc(num_indices, sizeof(uint32_t));
 
-    // This call will deduplicate vertices, modifying the arrays passed in `streams[]`,
-    // indices are written in `indices[]` and the number of unique vertices is returned.
     num_vertices = ufbx_generate_indices(streams, 1, indices, num_indices, NULL, NULL);
-
-    // create_vertex_buffer(vertices, num_vertices);
-    // create_index_buffer(indices, num_indices);
 
     struct Mesh_Part mesh_part = {0};
     mesh_part.index_array = indices;
@@ -223,12 +222,9 @@ struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
     mesh_part.vertex_array = vertices;
     mesh_part.vertex_count = num_vertices;
 
-    // free(indices);
-    // free(vertices);
-
     return mesh_part;
 }
-struct Node* load_node(ufbx_node* fbx_node)
+struct Node* load_node(ufbx_node* fbx_node, ufbx_scene* fbx_scene)
 {
     printf("Object: %s\n", fbx_node->name.data);
 
@@ -258,14 +254,32 @@ struct Node* load_node(ufbx_node* fbx_node)
     else 
     {
         node->type = NODE_TYPE_EMPTY;
+
+        if (fbx_node->is_root)
+        {
+            node->texture_count = fbx_scene->textures.count;
+            node->texture_array = calloc(node->texture_count, sizeof(struct Texture));
+
+            for (size_t i = 0; i < node->texture_count; i++)
+            {
+                ufbx_texture* fbx_texture = fbx_scene->textures.data[i];
+                struct Texture* texture = &node->texture_array[i];
+
+                texture->path = calloc(fbx_texture->relative_filename.length+1, sizeof(char));
+                memcpy(texture->path, fbx_texture->relative_filename.data, fbx_texture->relative_filename.length);
+            }
+            
+        }
     }
 
     node->child_array = calloc(fbx_node->children.count, sizeof(struct Node*));
     node->child_count = fbx_node->children.count;
     for (size_t i = 0; i < fbx_node->children.count; i++) 
     {
-        node->child_array[i] = load_node(fbx_node->children.data[i]);
+        node->child_array[i] = load_node(fbx_node->children.data[i], fbx_scene);
         node->child_array[i]->parent = node;
+        node->child_array[i]->texture_array = node->texture_array;
+        node->child_array[i]->texture_count = node->texture_count;
     }
 
     return node;
@@ -281,12 +295,13 @@ struct Node* load_fbx(char* path)
         exit(1);
     }
 
-    struct Node* scene = load_node(fbx_scene->root_node);
+    struct Node* scene = load_node(fbx_scene->root_node, fbx_scene);
 
     ufbx_free_scene(fbx_scene);
     return scene;
 }
 
+#include "yara_d3d12.h"
 void upload_node_buffers(struct Node* node, struct Device* device, struct Command_List* upload_command_list, struct Descriptor_Set* cbv_srv_uav_descriptor_set)
 {
     if (node->type == NODE_TYPE_MESH)
@@ -323,7 +338,7 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
             }
 
             struct Upload_Buffer* index_upload_buffer = 0;
-            device_create_upload_buffer(device, index_array, sizeof(unsigned int) * index_count, &index_upload_buffer);   
+            device_create_upload_buffer(device, index_array, sizeof(unsigned int) * index_count, &index_upload_buffer);
             {
                 struct Buffer_Descriptor buffer_description = {
                     .width = sizeof(unsigned int) * index_count,
@@ -385,20 +400,99 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
     {
         upload_node_buffers(node->child_array[i], device, upload_command_list, cbv_srv_uav_descriptor_set);
     }
+
+    if (!node->parent) // is_root
+    {
+        for (size_t i = 0; i < node->texture_count; i++)
+        {
+            struct Texture* texture = &node->texture_array[i];
+            printf("Texture Path: %s\n", texture->path);
+            
+            int x;
+            int y;
+            int component_count;
+            unsigned char* image_data = stbi_load(texture->path, &x, &y, &component_count, 0);
+
+            if (component_count == 3)
+            {
+                unsigned char* new_image_data = calloc(x * y, sizeof(unsigned char) * 4);
+                for (size_t pixel_i = 0; pixel_i < (x * y); pixel_i++)
+                {
+                    struct Pixel3
+                    {
+                        unsigned char r;
+                        unsigned char g;
+                        unsigned char b;
+                    };
+                    struct Pixel3* pixel3 = &((struct Pixel3*)image_data)[pixel_i];
+
+                    struct Pixel4
+                    {
+                        unsigned char r;
+                        unsigned char g;
+                        unsigned char b;
+                        unsigned char a;
+                    };
+                    struct Pixel4* pixel4 = &((struct Pixel4*)new_image_data)[pixel_i];
+
+                    pixel4->r = pixel3->r;
+                    pixel4->g = pixel3->g;
+                    pixel4->b = pixel3->b;
+                    pixel4->a = 255;
+
+                }
+                stbi_image_free(image_data);
+                image_data = new_image_data;
+            }
+
+            enum FORMAT formats[] = { FORMAT_UNKNOWN, FORMAT_R8_UNORM, FORMAT_R8G8_UNORM, FORMAT_R8G8B8A8_UNORM, FORMAT_R8G8B8A8_UNORM };
+
+            struct Buffer_Descriptor buffer_description = {
+                .width = (unsigned long long)x,
+                .height = (unsigned long long)y,
+                .descriptor_sets = {
+                    cbv_srv_uav_descriptor_set
+                },
+                .descriptor_sets_count = 1,
+                .buffer_type = BUFFER_TYPE_TEXTRUE2D,
+                .bind_types = {
+                    BIND_TYPE_SRV
+                },
+                .bind_types_count = 1,
+                .format = formats[component_count]
+            };
+            device_create_buffer(device, buffer_description, &texture->buffer);
+
+            wchar_t* w_path = calloc(strlen(texture->path)+1, sizeof(wchar_t));
+            mbstowcs(w_path, texture->path, strlen(texture->path));
+            ID3D12Resource_SetName(texture->buffer->resource, w_path);
+
+            struct Upload_Buffer* texture_upload_buffer = 0;
+            device_create_upload_buffer(device, 0, (unsigned long long)(x * y * sizeof(unsigned char) * component_count), &texture_upload_buffer);
+
+            void* mapped = upload_buffer_map(texture_upload_buffer); mapped;
+            if (component_count == 3)
+                memcpy(mapped, image_data, sizeof(unsigned char) * 4 * x * y);
+            else
+                memcpy(mapped, image_data, sizeof(unsigned char) * component_count * x * y);
+
+            upload_buffer_unmap(texture_upload_buffer);
+
+            if (component_count == 3)
+                free(image_data);
+            else
+                stbi_image_free(image_data);
+
+            command_list_copy_upload_buffer_to_buffer(upload_command_list, texture_upload_buffer, texture->buffer);
+            upload_buffer_destroy(texture_upload_buffer);
+        }
+    }
 }
 
 void draw_node(struct Node* node, struct Device* device, struct Command_List* command_list)
 {
     if (node->type == NODE_TYPE_MESH)
     {
-        // struct Upload_Buffer* constant_upload_buffer = 0;
-        // struct Model_Constant constant = { 
-        //     .model_to_world = node_global_transform(node)
-        // };
-        // device_create_upload_buffer(device, &constant, sizeof(struct Model_Constant), &constant_upload_buffer);
-        // command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
-        // upload_buffer_destroy(constant_upload_buffer);
-
         for (size_t i = 0; i < node->mesh.mesh_parts_count; i++)
         {
             struct Mesh_Part* mesh_part = &node->mesh.mesh_parts[i];

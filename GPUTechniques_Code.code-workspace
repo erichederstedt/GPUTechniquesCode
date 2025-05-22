@@ -12,7 +12,10 @@
 			"algorithm": "c",
 			"format": "c",
 			"xiosbase": "c",
-			"xutility": "c"
+			"xutility": "c",
+			"xlocale": "c",
+			"xstring": "c",
+			"stb_image.h": "c"
 		}
 	},
 	"launch": {

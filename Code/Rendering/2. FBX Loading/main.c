@@ -154,19 +154,15 @@ struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
     struct Vertex *vertices = calloc(num_triangles * 3, sizeof(struct Vertex));
     size_t num_vertices = 0;
 
-    // Reserve space for the maximum triangle indices.
     size_t num_tri_indices = mesh->max_face_triangles * 3;
     uint32_t *tri_indices = calloc(num_tri_indices, sizeof(uint32_t));
 
-    // Iterate over each face using the specific material.
     for (size_t face_ix = 0; face_ix < part->num_faces; face_ix++) 
     {
         ufbx_face face = mesh->faces.data[part->face_indices.data[face_ix]];
 
-        // Triangulate the face into `tri_indices[]`.
         uint32_t num_tris = ufbx_triangulate_face(tri_indices, num_tri_indices, mesh, face);
 
-        // Iterate over each triangle corner contiguously.
         for (size_t i = 0; i < num_tris * 3; i++) 
         {
             uint32_t index = tri_indices[i];
@@ -199,32 +195,22 @@ struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
         }
     }
 
-    // Should have written all the vertices.
     free(tri_indices);
     assert(num_vertices == num_triangles * 3);
 
-    // Generate the index buffer.
     ufbx_vertex_stream streams[1] = {
         { vertices, num_vertices, sizeof(struct Vertex) },
     };
     size_t num_indices = num_triangles * 3;
     uint32_t *indices = calloc(num_indices, sizeof(uint32_t));
 
-    // This call will deduplicate vertices, modifying the arrays passed in `streams[]`,
-    // indices are written in `indices[]` and the number of unique vertices is returned.
     num_vertices = ufbx_generate_indices(streams, 1, indices, num_indices, NULL, NULL);
-
-    // create_vertex_buffer(vertices, num_vertices);
-    // create_index_buffer(indices, num_indices);
 
     struct Mesh_Part mesh_part = {0};
     mesh_part.index_array = indices;
     mesh_part.index_count = num_indices;
     mesh_part.vertex_array = vertices;
     mesh_part.vertex_count = num_vertices;
-
-    // free(indices);
-    // free(vertices);
 
     return mesh_part;
 }
@@ -323,7 +309,7 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
             }
 
             struct Upload_Buffer* index_upload_buffer = 0;
-            device_create_upload_buffer(device, index_array, sizeof(unsigned int) * index_count, &index_upload_buffer);   
+            device_create_upload_buffer(device, index_array, sizeof(unsigned int) * index_count, &index_upload_buffer);
             {
                 struct Buffer_Descriptor buffer_description = {
                     .width = sizeof(unsigned int) * index_count,
@@ -391,14 +377,6 @@ void draw_node(struct Node* node, struct Device* device, struct Command_List* co
 {
     if (node->type == NODE_TYPE_MESH)
     {
-        // struct Upload_Buffer* constant_upload_buffer = 0;
-        // struct Model_Constant constant = { 
-        //     .model_to_world = node_global_transform(node)
-        // };
-        // device_create_upload_buffer(device, &constant, sizeof(struct Model_Constant), &constant_upload_buffer);
-        // command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
-        // upload_buffer_destroy(constant_upload_buffer);
-
         for (size_t i = 0; i < node->mesh.mesh_parts_count; i++)
         {
             struct Mesh_Part* mesh_part = &node->mesh.mesh_parts[i];
