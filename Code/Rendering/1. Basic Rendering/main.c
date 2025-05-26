@@ -91,7 +91,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     struct Descriptor_Set* cbv_srv_uav_descriptor_set = 0;
     device_create_descriptor_set(device, DESCRIPTOR_TYPE_CBV_SRV_UAV, 2048, &cbv_srv_uav_descriptor_set);
 
-    struct Buffer** backbuffers = _alloca(sizeof(struct Buffer*) * swapchain_get_descriptor(swapchain).backbuffer_count);
+    struct Render_Target_View** backbuffers = _alloca(sizeof(struct Render_Target_View*) * swapchain_get_descriptor(swapchain).backbuffer_count);
     swapchain_create_backbuffers(swapchain, device, rtv_descriptor_set, backbuffers);
     
     struct Shader* shader = 0;
@@ -162,15 +162,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         struct Buffer_Descriptor buffer_description = {
             .width = sizeof(vertices),
             .height = 1,
-            .descriptor_sets = {
-                cbv_srv_uav_descriptor_set
-            },
-            .descriptor_sets_count = 1,
             .buffer_type = BUFFER_TYPE_BUFFER,
-            .bind_types = {
-                BIND_TYPE_SRV
-            },
-            .bind_types_count = 1
         };
         device_create_buffer(device, buffer_description, &vertex_buffer);
     }
@@ -185,15 +177,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         struct Buffer_Descriptor buffer_description = {
             .width = sizeof(indices),
             .height = 1,
-            .descriptor_sets = {
-                cbv_srv_uav_descriptor_set
-            },
-            .descriptor_sets_count = 1,
             .buffer_type = BUFFER_TYPE_BUFFER,
-            .bind_types = {
-                BIND_TYPE_SRV
-            },
-            .bind_types_count = 1
         };
         device_create_buffer(device, buffer_description, &index_buffer);
     }
@@ -204,14 +188,11 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         Mat4 world_to_clip;
     };
     struct Buffer* constant_buffer = 0;
+    struct Constant_Buffer_View* cbv = 0;
     {
         struct Buffer_Descriptor buffer_description = {
             .width = sizeof(struct Constant),
             .height = 1,
-            .descriptor_sets = {
-                cbv_srv_uav_descriptor_set
-            },
-            .descriptor_sets_count = 1,
             .buffer_type = BUFFER_TYPE_BUFFER,
             .bind_types = {
                 BIND_TYPE_CBV
@@ -219,6 +200,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             .bind_types_count = 1
         };
         device_create_buffer(device, buffer_description, &constant_buffer);
+
+        device_create_constant_buffer_view(device, 0, cbv_srv_uav_descriptor_set, constant_buffer, &cbv);
     }
         
     {
@@ -274,8 +257,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         
         command_list_reset(command_list);
         
-        struct Buffer* backbuffer = backbuffers[backbuffer_index];
-        struct Buffer_Descriptor backbuffer_description = buffer_get_descriptor(backbuffer);
+        struct Render_Target_View* backbuffer_rtv = backbuffers[backbuffer_index];
+        struct Buffer_Descriptor backbuffer_description = buffer_get_descriptor(render_target_view_get_buffer(backbuffer_rtv));
 
         struct Viewport viewport = {
             .width = (float)backbuffer_description.width,
@@ -309,16 +292,16 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_set_viewport(command_list, viewport);
         command_list_set_scissor_rect(command_list, scissor_rect);
         
-        command_list_set_render_targets(command_list, &backbuffer, 1, 0);
+        command_list_set_render_targets(command_list, &backbuffer_rtv, 1, 0);
         float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
-        command_list_clear_render_target(command_list, backbuffer, clear_color);
+        command_list_clear_render_target(command_list, backbuffer_rtv, clear_color);
         command_list_set_vertex_buffer(command_list, vertex_buffer, sizeof(vertices), sizeof(struct Vertex));
         command_list_set_index_buffer(command_list, index_buffer, sizeof(indices), FORMAT_R32_UINT);
-        command_list_set_constant_buffer(command_list, constant_buffer, 0);
+        command_list_set_constant_buffer(command_list, cbv, 0);
         command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         command_list_draw_indexed_instanced(command_list, 3, 1, 0, 0, 0);
         
-        command_list_set_buffer_state(command_list, backbuffer, RESOURCE_STATE_PRESENT);
+        command_list_set_buffer_state(command_list, render_target_view_get_buffer(backbuffer_rtv), RESOURCE_STATE_PRESENT);
         command_list_close(command_list);
 
         command_queue_execute(command_queue, &command_list, 1);

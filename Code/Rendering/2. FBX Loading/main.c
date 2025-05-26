@@ -147,6 +147,7 @@ struct Mesh_Part
     struct Buffer* index_buffer;
 
     struct Buffer* constant_buffer;
+    struct Constant_Buffer_View* cbv;
 };
 struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part)
 {
@@ -295,15 +296,7 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
                 struct Buffer_Descriptor buffer_description = {
                     .width = sizeof(struct Vertex) * vertex_count,
                     .height = 1,
-                    .descriptor_sets = {
-                        cbv_srv_uav_descriptor_set
-                    },
-                    .descriptor_sets_count = 1,
                     .buffer_type = BUFFER_TYPE_BUFFER,
-                    .bind_types = {
-                        BIND_TYPE_SRV
-                    },
-                    .bind_types_count = 1
                 };
                 device_create_buffer(device, buffer_description, &mesh_part->vertex_buffer);
             }
@@ -314,15 +307,7 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
                 struct Buffer_Descriptor buffer_description = {
                     .width = sizeof(unsigned int) * index_count,
                     .height = 1,
-                    .descriptor_sets = {
-                        cbv_srv_uav_descriptor_set
-                    },
-                    .descriptor_sets_count = 1,
                     .buffer_type = BUFFER_TYPE_BUFFER,
-                    .bind_types = {
-                        BIND_TYPE_SRV
-                    },
-                    .bind_types_count = 1
                 };
                 device_create_buffer(device, buffer_description, &mesh_part->index_buffer);
             }
@@ -335,10 +320,6 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
                 struct Buffer_Descriptor buffer_description = {
                     .width = sizeof(struct Model_Constant),
                     .height = 1,
-                    .descriptor_sets = {
-                        cbv_srv_uav_descriptor_set
-                    },
-                    .descriptor_sets_count = 1,
                     .buffer_type = BUFFER_TYPE_BUFFER,
                     .bind_types = {
                         BIND_TYPE_CBV
@@ -346,6 +327,8 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
                     .bind_types_count = 1
                 };
                 device_create_buffer(device, buffer_description, &mesh_part->constant_buffer);
+
+                device_create_constant_buffer_view(device, 0, cbv_srv_uav_descriptor_set, mesh_part->constant_buffer, &mesh_part->cbv);
             }
 
             struct Upload_Buffer* constant_upload_buffer = 0;
@@ -383,7 +366,7 @@ void draw_node(struct Node* node, struct Device* device, struct Command_List* co
             if (mesh_part->vertex_count == 0 || mesh_part->index_count == 0)
                 continue;
 
-            command_list_set_constant_buffer(command_list, mesh_part->constant_buffer, 0);
+            command_list_set_constant_buffer(command_list, mesh_part->cbv, 0);
             command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             command_list_set_vertex_buffer(command_list, mesh_part->vertex_buffer, sizeof(struct Vertex) * mesh_part->vertex_count, sizeof(struct Vertex));
             command_list_set_index_buffer(command_list, mesh_part->index_buffer, sizeof(unsigned int) * mesh_part->index_count, FORMAT_R32_UINT);
@@ -438,20 +421,17 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     device_create_descriptor_set(device, DESCRIPTOR_TYPE_DSV, 2048, &dsv_descriptor_set);
 
     struct Swapchain_Descriptor swapchain_descriptor = swapchain_get_descriptor(swapchain);
-    struct Buffer** backbuffers = _alloca(sizeof(struct Buffer*) * swapchain_descriptor.backbuffer_count);
+    struct Render_Target_View** backbuffers = _alloca(sizeof(struct Render_Target_View*) * swapchain_descriptor.backbuffer_count);
     swapchain_create_backbuffers(swapchain, device, rtv_descriptor_set, backbuffers);
 
     struct Buffer** depth_buffers = _alloca(sizeof(struct Buffer*) * swapchain_descriptor.backbuffer_count);
+    struct Depth_Stencil_View** depth_stencil_views = _alloca(sizeof(struct Depth_Stencil_View*) * swapchain_descriptor.backbuffer_count);
     for (size_t i = 0; i < swapchain_descriptor.backbuffer_count; i++)
     {
         struct Buffer* depth_buffer = 0;
         struct Buffer_Descriptor buffer_description = {
             .width = swapchain_descriptor.width,
             .height = swapchain_descriptor.height,
-            .descriptor_sets = {
-                dsv_descriptor_set
-            },
-            .descriptor_sets_count = 1,
             .buffer_type = BUFFER_TYPE_TEXTRUE2D,
             .bind_types = {
                 BIND_TYPE_DSV
@@ -461,6 +441,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         };
         device_create_buffer(device, buffer_description, &depth_buffer);
         depth_buffers[i] = depth_buffer;
+
+        device_create_depth_stencil_view(device, 0, dsv_descriptor_set, depth_buffer, &depth_stencil_views[i]);
     }
     
     struct Shader* shader = 0;
@@ -538,14 +520,11 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         Mat4 world_to_clip;
     };
     struct Buffer* camera_constant_buffer = 0;
+    struct Constant_Buffer_View* camera_cbv = 0;
     {
         struct Buffer_Descriptor buffer_description = {
             .width = sizeof(struct Camera_Constant),
             .height = 1,
-            .descriptor_sets = {
-                cbv_srv_uav_descriptor_set
-            },
-            .descriptor_sets_count = 1,
             .buffer_type = BUFFER_TYPE_BUFFER,
             .bind_types = {
                 BIND_TYPE_CBV
@@ -553,6 +532,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             .bind_types_count = 1
         };
         device_create_buffer(device, buffer_description, &camera_constant_buffer);
+
+        device_create_constant_buffer_view(device, 0, cbv_srv_uav_descriptor_set, camera_constant_buffer, &camera_cbv);
     }
     
     struct Node* scene_node = load_fbx("Knight_USD_002.fbx");
@@ -611,9 +592,9 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         
         command_list_reset(command_list);
         
-        struct Buffer* backbuffer = backbuffers[backbuffer_index];
-        struct Buffer* depth_buffer = depth_buffers[backbuffer_index];
-        struct Buffer_Descriptor backbuffer_description = buffer_get_descriptor(backbuffer);
+        struct Render_Target_View* backbuffer_rtv = backbuffers[backbuffer_index];
+        struct Depth_Stencil_View* dsv = depth_stencil_views[backbuffer_index];
+        struct Buffer_Descriptor backbuffer_description = buffer_get_descriptor(render_target_view_get_buffer(backbuffer_rtv));
 
         struct Viewport viewport = {
             .width = (float)backbuffer_description.width,
@@ -628,14 +609,14 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         };
 
         float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
-        command_list_clear_render_target(command_list, backbuffer, clear_color);
-        command_list_clear_depth_target(command_list, depth_buffer, 1.0f, 0, 0);
+        command_list_clear_render_target(command_list, backbuffer_rtv, clear_color);
+        command_list_clear_depth_target(command_list, dsv, 1.0f, 0, 0);
 
         command_list_set_pipeline_state_object(command_list, pipeline_state_object);
         command_list_set_shader(command_list, shader);
         command_list_set_viewport(command_list, viewport);
         command_list_set_scissor_rect(command_list, scissor_rect);
-        command_list_set_render_targets(command_list, &backbuffer, 1, depth_buffer);
+        command_list_set_render_targets(command_list, &backbuffer_rtv, 1, dsv);
         
         Mat4 camera_translation = Translate(camera_position);
         Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
@@ -652,10 +633,10 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, camera_constant_buffer);
         upload_buffer_destroy(constant_upload_buffer);
         
-        command_list_set_constant_buffer(command_list, camera_constant_buffer, 1);
+        command_list_set_constant_buffer(command_list, camera_cbv, 1);
         draw_node(scene_node, device, command_list);
         
-        command_list_set_buffer_state(command_list, backbuffer, RESOURCE_STATE_PRESENT);
+        command_list_set_buffer_state(command_list, render_target_view_get_buffer(backbuffer_rtv), RESOURCE_STATE_PRESENT);
         command_list_close(command_list);
 
         command_queue_execute(command_queue, &command_list, 1);
