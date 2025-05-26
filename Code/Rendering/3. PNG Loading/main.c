@@ -338,7 +338,6 @@ struct Node* load_fbx(char* path)
     return scene;
 }
 
-#include "yara_d3d12.h"
 void upload_node_buffers(struct Node* node, struct Device* device, struct Command_List* upload_command_list, struct Descriptor_Set* cbv_srv_uav_descriptor_set)
 {
     if (node->type == NODE_TYPE_MESH)
@@ -479,16 +478,9 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
             };
             device_create_buffer(device, buffer_description, &texture->buffer);
 
-            // D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
-            // srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-            // srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            // ( (device->device)->lpVtbl -> CreateShaderResourceView(device->device,texture->buffer->resource,0, texture->buffer->handles[0].cpu_descriptor_handle) );
-
             device_create_shader_resource_view(device, 0, cbv_srv_uav_descriptor_set, texture->buffer, &texture->srv);
 
-            wchar_t* w_path = calloc(strlen(texture->path)+1, sizeof(wchar_t));
-            mbstowcs(w_path, texture->path, strlen(texture->path));
-            ID3D12Resource_SetName(texture->buffer->resource, w_path);
+            buffer_set_name(texture->buffer, texture->path);
 
             struct Upload_Buffer* texture_upload_buffer = 0;
             device_create_upload_buffer(device, 0, (unsigned long long)(x * y * sizeof(unsigned char) * component_count), &texture_upload_buffer);
@@ -821,8 +813,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_set_viewport(command_list, viewport);
         command_list_set_scissor_rect(command_list, scissor_rect);
         command_list_set_render_targets(command_list, &backbuffer_rtv, 1, dsv);
-        ID3D12GraphicsCommandList* cl = command_list->command_list_allocation->command_list;
-        cl->lpVtbl->SetDescriptorHeaps(cl, 1, &cbv_srv_uav_descriptor_set->descriptor_heap);
+        command_list_set_descriptor_set(command_list, &cbv_srv_uav_descriptor_set, 1);
         
         Mat4 camera_translation = Translate(camera_position);
         Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
