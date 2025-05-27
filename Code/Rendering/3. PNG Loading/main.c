@@ -333,6 +333,8 @@ struct Node* load_fbx(char* path)
         exit(1);
     }
 
+    printf("Scene: %s\n", path);
+
     struct Node* scene = load_node(fbx_scene->root_node, 0, fbx_scene);
 
     ufbx_free_scene(fbx_scene);
