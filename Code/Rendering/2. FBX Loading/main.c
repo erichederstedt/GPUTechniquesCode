@@ -92,9 +92,12 @@ struct Node
     };
 
     char* name;
-    Vec3 position;
-    Quat rotation;
-    Vec3 scale;
+    Vec3 local_position;
+    Quat local_rotation;
+    Vec3 local_scale;
+    Vec3 geometry_position;
+    Quat geometry_rotation;
+    Vec3 geometry_scale;
     struct Node* parent;
     struct Node** child_array;
     size_t child_count;
@@ -107,9 +110,16 @@ struct Node* node_create()
 void node_append_child(struct Node* node, struct Node* child);
 Mat4 node_local_transform(struct Node* node)
 {
-    Mat4 translation = Translate(node->position);
-    Mat4 rotation = QToM4(node->rotation);
-    Mat4 scale = Scale(node->scale);
+    Mat4 translation = Translate(node->local_position);
+    Mat4 rotation = QToM4(node->local_rotation);
+    Mat4 scale = Scale(node->local_scale);
+    return MulM4(translation, MulM4(rotation, scale));
+}
+Mat4 node_geometry_transform(struct Node* node)
+{
+    Mat4 translation = Translate(node->geometry_position);
+    Mat4 rotation = QToM4(node->geometry_rotation);
+    Mat4 scale = Scale(node->geometry_scale);
     return MulM4(translation, MulM4(rotation, scale));
 }
 Mat4 node_global_transform(struct Node* node)
@@ -121,6 +131,10 @@ Mat4 node_global_transform(struct Node* node)
     }
     
     return MulM4(parent, node_local_transform(node));
+}
+Mat4 node_global_transform_geometry(struct Node* node)
+{
+    return MulM4(node_global_transform(node), node_geometry_transform(node));
 }
 
 #define conv_float(in, out) for (size_t conv_i = 0; conv_i < ARRAYSIZE(in.v); conv_i++) { out.Elements[conv_i] = (float)in.v[conv_i]; }
@@ -223,9 +237,13 @@ struct Node* load_node(ufbx_node* fbx_node)
     node->name = calloc(sizeof(char), fbx_node->name.length+1);
     strcpy(node->name, fbx_node->name.data);
     
-    conv_float(fbx_node->local_transform.translation, node->position);
-    conv_float(fbx_node->local_transform.rotation, node->rotation);
-    conv_float(fbx_node->local_transform.scale, node->scale);
+    conv_float(fbx_node->local_transform.translation, node->local_position);
+    conv_float(fbx_node->local_transform.rotation, node->local_rotation);
+    conv_float(fbx_node->local_transform.scale, node->local_scale);
+
+    conv_float(fbx_node->geometry_transform.translation, node->geometry_position);
+    conv_float(fbx_node->geometry_transform.rotation, node->geometry_rotation);
+    conv_float(fbx_node->geometry_transform.scale, node->geometry_scale);
 
     if (fbx_node->mesh)
     {
@@ -334,7 +352,7 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
             struct Upload_Buffer* constant_upload_buffer = 0;
             {
                 struct Model_Constant constant = { 
-                    .model_to_world = node_global_transform(node)
+                    .model_to_world = node_global_transform_geometry(node)
                 };
                 device_create_upload_buffer(device, &constant, sizeof(struct Model_Constant), &constant_upload_buffer);
             }
@@ -537,8 +555,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     }
     
     struct Node* scene_node = load_fbx("Knight_USD_002.fbx");
-    scene_node->position = V3(0.0f, 0.0f, 10.0f);
-    scene_node->scale = V3(0.01f, 0.01f, 0.01f);
+    scene_node->local_position = V3(0.0f, 0.0f, 10.0f);
+    scene_node->local_scale = V3(0.01f, 0.01f, 0.01f);
 
     {
         struct Command_List* upload_command_list = 0;
