@@ -1,0 +1,3 @@
+Sponza.fbx: https://github.com/TheRealMJP/DeferredTexturing/tree/master/Content/Models/Sponza
+Knight_USD_002.fbx: Frank Meinl and Katica Putica and Cristiano Siqueira and Timothy Heath and Justin Prazen and Sebastian Herholz and Bruce Cherniak and Anton Kaplanyan, 2022, Intel Sample Library, https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-processing-research/samples.html
+NewSponza_Main_Yup_003_bin.fbx: Frank Meinl and Katica Putica and Cristiano Siqueira and Timothy Heath and Justin Prazen and Sebastian Herholz and Bruce Cherniak and Anton Kaplanyan, 2022, Intel Sample Library, https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-processing-research/samples.html
