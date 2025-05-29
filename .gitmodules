@@ -1,0 +1,3 @@
+[submodule "Extra/YetAnotherRenderingAPI"]
+	path = Extra/YetAnotherRenderingAPI
+	url = https://github.com/erichederstedt/YetAnotherRenderingAPI.git
