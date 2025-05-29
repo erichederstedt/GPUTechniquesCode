@@ -102,3 +102,14 @@ void CreateConsole()
     FILE* fp_in;
     freopen_s(&fp_in, "CONIN$", "r", stdin);
 }
+
+#include <string.h>
+#define ASSET_PATH "..\\..\\..\\Assets\\"
+char* get_asset_path(const char* path)
+{
+    size_t len = strlen(ASSET_PATH) + strlen(path);
+    char* string = calloc(len+1, sizeof(char));
+    strcat(string, ASSET_PATH);
+    strcat(string, path);
+    return string;
+}

@@ -554,9 +554,11 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_constant_buffer_view(device, 0, cbv_srv_uav_descriptor_set, camera_constant_buffer, &camera_cbv);
     }
     
-    struct Node* scene_node = load_fbx("Knight_USD_002.fbx");
+    char* asset_path = get_asset_path("Knight_USD_002.fbx");
+    struct Node* scene_node = load_fbx(asset_path);
     scene_node->local_position = V3(0.0f, 0.0f, 10.0f);
     scene_node->local_scale = V3(0.01f, 0.01f, 0.01f);
+    free(asset_path);
 
     {
         struct Command_List* upload_command_list = 0;

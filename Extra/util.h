@@ -13,4 +13,6 @@ unsigned long long GetRdtscFreq();
 void SetCpuAndThreadPriority();
 
 void CreateConsole();
+
+char* get_asset_path(const char* path);
 #endif

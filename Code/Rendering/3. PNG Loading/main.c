@@ -303,8 +303,7 @@ struct Node* load_node(ufbx_node* fbx_node, struct Node* root, ufbx_scene* fbx_s
                 ufbx_texture* fbx_texture = fbx_scene->textures.data[i];
                 struct Texture* texture = &node->texture_array[i];
 
-                texture->path = calloc(fbx_texture->relative_filename.length+1, sizeof(char));
-                memcpy(texture->path, fbx_texture->relative_filename.data, fbx_texture->relative_filename.length);
+                texture->path = get_asset_path(fbx_texture->relative_filename.data);
             }
             
         }
@@ -429,44 +428,16 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
             struct Texture* texture = &node->texture_array[i];
             printf("Texture Path: %s\n", texture->path);
             
+            int expected_component_count;
+            stbi_info(texture->path, &(int){0}, &(int){0}, &expected_component_count);
+
             stbi_set_flip_vertically_on_load(1);
             int x;
             int y;
             int component_count;
-            unsigned char* image_data = stbi_load(texture->path, &x, &y, &component_count, 4);
-            component_count = 4;
-
-            if (component_count == 3)
-            {
-                unsigned char* new_image_data = calloc(x * y, sizeof(unsigned char) * 4);
-                for (size_t pixel_i = 0; pixel_i < (x * y); pixel_i++)
-                {
-                    struct Pixel3
-                    {
-                        unsigned char r;
-                        unsigned char g;
-                        unsigned char b;
-                    };
-                    struct Pixel3* pixel3 = &((struct Pixel3*)image_data)[pixel_i];
-
-                    struct Pixel4
-                    {
-                        unsigned char r;
-                        unsigned char g;
-                        unsigned char b;
-                        unsigned char a;
-                    };
-                    struct Pixel4* pixel4 = &((struct Pixel4*)new_image_data)[pixel_i];
-
-                    pixel4->r = pixel3->r;
-                    pixel4->g = pixel3->g;
-                    pixel4->b = pixel3->b;
-                    pixel4->a = 255;
-
-                }
-                stbi_image_free(image_data);
-                image_data = new_image_data;
-            }
+            unsigned char* image_data = stbi_load(texture->path, &x, &y, &component_count, (expected_component_count == 3) ? 4 : 0);
+            if (expected_component_count == 3)
+                component_count = 4;
 
             enum FORMAT formats[] = { FORMAT_UNKNOWN, FORMAT_R8_UNORM, FORMAT_R8G8_UNORM, FORMAT_R8G8B8A8_UNORM, FORMAT_R8G8B8A8_UNORM };
 
@@ -491,17 +462,11 @@ void upload_node_buffers(struct Node* node, struct Device* device, struct Comman
 
             void* mapped = upload_buffer_map(texture_upload_buffer); mapped;
             
-            if (component_count == 3)
-                memcpy(mapped, image_data, sizeof(unsigned char) * 4 * x * y);
-            else
-                memcpy(mapped, image_data, sizeof(unsigned char) * component_count * x * y);
-
+            memcpy(mapped, image_data, sizeof(unsigned char) * component_count * x * y);
+            
             upload_buffer_unmap(texture_upload_buffer);
 
-            if (component_count == 3)
-                free(image_data);
-            else
-                stbi_image_free(image_data);
+            stbi_image_free(image_data);
 
             command_list_copy_upload_buffer_to_buffer(upload_command_list, texture_upload_buffer, texture->buffer);
             upload_buffer_destroy(texture_upload_buffer);
@@ -722,8 +687,10 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_constant_buffer_view(device, 0, cbv_srv_uav_descriptor_set, camera_constant_buffer, &camera_cbv);
     }
     
-    struct Node* scene_node = load_fbx("Sponza.fbx");
+    char* asset_path = get_asset_path("NewSponza_Main_Yup_003_bin.fbx");
+    struct Node* scene_node = load_fbx(asset_path);
     scene_node->local_scale = V3(0.01f, 0.01f, 0.01f);
+    free(asset_path);
 
     {
         struct Command_List* upload_command_list = 0;
