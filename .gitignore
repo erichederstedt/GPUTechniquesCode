@@ -1,4 +1,5 @@
 clang_rt.asan_dynamic-x86_64.dll
 *.exe
 *.pdb
+*.ilk
 .vscode/launch.json

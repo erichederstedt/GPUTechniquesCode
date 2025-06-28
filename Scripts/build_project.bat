@@ -13,11 +13,10 @@ setlocal enabledelayedexpansion
 
 call "Scripts/copy_file_from_path.bat" clang_rt.asan_dynamic-x86_64.dll %1
 
-rem /O2
+rem /O2 /fsanitize=address
 @set CC=cl
-@set FLAGS=/std:c++17 /D_CRT_SECURE_NO_WARNINGS /fsanitize=address /DSDL_MAIN_HANDLED /Z7 /W4 /WX /MP /EHsc /I "./Extra" /I "./Extra/YetAnotherRenderingAPI"
+@set FLAGS=/D_CRT_SECURE_NO_WARNINGS /DSDL_MAIN_HANDLED /Z7 /W4 /WX /MP /EHsc /I "./Extra" /I "./Extra/YetAnotherRenderingAPI"
 @set "SRC_FILES="
-rem set "SRC_FILES=!SRC_FILES! "Src/main.c""
 for /r %1 %%I in (*.c) do (
     set "SRC_FILES=!SRC_FILES! "%%~fI""
 )
