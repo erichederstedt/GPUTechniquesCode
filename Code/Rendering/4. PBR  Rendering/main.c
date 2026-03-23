@@ -898,8 +898,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             DWORD                   dwCaps4;
             DWORD                   dwReserved2;
         };
-
-        enum DDS_FLAGS 
+        enum DDPF_FLAGS 
         {
             DDPF_ALPHAPIXELS =  0x1,
             DDPF_ALPHA =        0x2,
@@ -908,13 +907,30 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             DDPF_YUV =          0x200,
             DDPF_LUMINANCE =    0x20000,
         };
+        enum DDSD_FLAGS
+        {
+            DDSD_CAPS =        0x1,
+            DDSD_HEIGHT =      0x2,
+            DDSD_WIDTH =       0x4,
+            DDSD_PITCH =       0x8,
+            DDSD_PIXELFORMAT = 0x1000,
+            DDSD_MIPMAPCOUNT = 0x20000,
+            DDSD_LINEARSIZE =  0x80000,
+            DDSD_DEPTH =       0x800000,
+        };
 
         DWORD* dwMagic = (DWORD*)buffer; dwMagic;
         buffer += sizeof(DWORD);
+        if (!memcmp(dwMagic, "DDS ", 4) && false)
+        {
+            printf("Corrupted DDS file! dwMagic: %.*s\n", 4, (char*)&dwMagic);
+            __debugbreak();
+        }
+
         struct DDS_HEADER* header = (struct DDS_HEADER*)buffer;
         buffer += sizeof(struct DDS_HEADER);
+
         struct DDS_HEADER_DXT10* header10 = NULL;
-        char* test = (char*)&header->ddspf.dwFourCC; test;
         if (header->ddspf.dwFlags & DDPF_FOURCC && !memcmp(&header->ddspf.dwFourCC, "DX10", 4))
         {
             header10 = (struct DDS_HEADER_DXT10*)buffer;
@@ -1007,8 +1023,37 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             // Handle format shit from header10
         }
         
-        for (unsigned int iMipLevel = 0; iMipLevel < header->dwMipMapCount; iMipLevel++)
-        {
+        uint8_t* image_data = (uint8_t*)buffer; // After header
+        uint8_t* mip_ptr = image_data;
+
+        int mip_count = (header->dwFlags & DDSD_MIPMAPCOUNT) ? header->dwMipMapCount : 1;
+
+        struct Buffer_Descriptor buffer_desc = {0};
+        buffer_desc.width = (unsigned long long)header->dwWidth;
+        buffer_desc.height = (unsigned long long)header->dwHeight;
+        buffer_desc.mip_count = mip_count;
+        buffer_desc.format = texture_format;
+        buffer_desc.buffer_type = BUFFER_TYPE_TEXTRUE2D;
+        buffer_desc.bind_types[0] = BIND_TYPE_SRV;
+        buffer_desc.bind_types_count = 1;
+        struct Buffer* texture_buffer = 0;
+        device_create_buffer(device, buffer_desc, &texture_buffer);
+
+        struct Upload_Buffer* texture_upload_buffer = 0;
+        device_create_upload_buffer(device, 0, (buffer_desc.width * buffer_desc.height * format_bit_size(texture_format)) / 8, &texture_upload_buffer);
+
+        // @continue map texture_upload_buffer and upload this shit
+        for (int mip = 0; mip < mip_count; ++mip) {
+            int mip_width = max(1, header->dwWidth >> mip);
+            int mip_height = max(1, header->dwHeight >> mip);
+            size_t mip_size = format_compute_mip_size(texture_format, mip_width, mip_height);
+
+            // Process mip_ptr with size mip_size
+            mip_ptr += mip_size;
+            printf("Mip level: %d\n", mip);
+            printf("Mip width: %d\n", mip_width);
+            printf("Mip height: %d\n", mip_height);
+            printf("Mip size: %zd\n", mip_size);
 
         }
 
@@ -1100,21 +1145,20 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_set_render_targets(command_list, &backbuffer_rtv, 1, dsv);
         command_list_set_descriptor_set(command_list, &cbv_srv_uav_descriptor_set, 1);
         
-        Mat4 camera_translation = Translate(camera_position);
-        Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
-        Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
-        camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
-        Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
-        struct Upload_Buffer* constant_upload_buffer = 0;
         {
+            Mat4 camera_translation = Translate(camera_position);
+            Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
+            Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
+            camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
+            Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
             struct Camera_Constant constant = { 
                 .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform))
             };
-            device_create_upload_buffer(device, &constant, sizeof(struct Camera_Constant), &constant_upload_buffer);
+            struct Constant* constant_buffer_ptr = command_list_map_buffer(command_list, camera_constant_buffer);
+            memcpy(constant_buffer_ptr, &constant, sizeof(struct Camera_Constant));
+            command_list_unmap_buffer(command_list, camera_constant_buffer);
         }
-        command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, camera_constant_buffer);
-        upload_buffer_destroy(constant_upload_buffer);
-        
+
         command_list_set_constant_buffer(command_list, camera_cbv, 1);
         draw_node(scene_node, device, command_list);
         

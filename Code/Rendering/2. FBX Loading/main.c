@@ -638,20 +638,19 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_set_scissor_rect(command_list, scissor_rect);
         command_list_set_render_targets(command_list, &backbuffer_rtv, 1, dsv);
         
-        Mat4 camera_translation = Translate(camera_position);
-        Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
-        Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
-        camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
-        Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
-        struct Upload_Buffer* constant_upload_buffer = 0;
         {
+            Mat4 camera_translation = Translate(camera_position);
+            Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
+            Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
+            camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
+            Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
             struct Camera_Constant constant = { 
                 .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform))
             };
-            device_create_upload_buffer(device, &constant, sizeof(struct Camera_Constant), &constant_upload_buffer);
+            struct Constant* constant_buffer_ptr = command_list_map_buffer(command_list, camera_constant_buffer);
+            memcpy(constant_buffer_ptr, &constant, sizeof(struct Camera_Constant));
+            command_list_unmap_buffer(command_list, camera_constant_buffer);
         }
-        command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, camera_constant_buffer);
-        upload_buffer_destroy(constant_upload_buffer);
         
         command_list_set_constant_buffer(command_list, camera_cbv, 1);
         draw_node(scene_node, device, command_list);

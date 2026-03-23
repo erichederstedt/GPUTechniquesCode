@@ -658,9 +658,16 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     for (int i = 0; i < 8; ++i)
     {
         pipeline_state_object_descriptor.blend_descriptor.render_target_blend_descriptors[i] = (struct Render_Target_Blend_Descriptor){
-            .blend_enable = 0,
+            .blend_enable = 1,
             .logic_op_enable = 0,
-            .render_target_write_mask = COLOR_WRITE_ENABLE_ALL
+            .src_blend_type = BLEND_TYPE_SRC_ALPHA,
+            .src_blend_type_alpha = BLEND_TYPE_ONE,
+            .dest_blend_type = BLEND_TYPE_INV_SRC_ALPHA,
+            .blend_op = BLEND_OP_ADD,
+            .logic_op = LOGIC_OP_NOOP,
+            .dest_blend_type_alpha = BLEND_TYPE_INV_SRC_ALPHA,
+            .blend_op_alpha = BLEND_OP_ADD,
+            .render_target_write_mask = 0x0F
         };
     }
     struct Pipeline_State_Object* pipeline_state_object = 0;
@@ -771,20 +778,19 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_set_render_targets(command_list, &backbuffer_rtv, 1, dsv);
         command_list_set_descriptor_set(command_list, &cbv_srv_uav_descriptor_set, 1);
         
-        Mat4 camera_translation = Translate(camera_position);
-        Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
-        Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
-        camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
-        Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
-        struct Upload_Buffer* constant_upload_buffer = 0;
         {
+            Mat4 camera_translation = Translate(camera_position);
+            Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
+            Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
+            camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
+            Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 100.0f);
             struct Camera_Constant constant = { 
                 .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform))
             };
-            device_create_upload_buffer(device, &constant, sizeof(struct Camera_Constant), &constant_upload_buffer);
+            struct Constant* constant_buffer_ptr = command_list_map_buffer(command_list, camera_constant_buffer);
+            memcpy(constant_buffer_ptr, &constant, sizeof(struct Camera_Constant));
+            command_list_unmap_buffer(command_list, camera_constant_buffer);
         }
-        command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, camera_constant_buffer);
-        upload_buffer_destroy(constant_upload_buffer);
         
         command_list_set_constant_buffer(command_list, camera_cbv, 1);
         draw_node(scene_node, device, command_list);

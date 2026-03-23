@@ -272,7 +272,6 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             .bottom = (long)backbuffer_description.height,
         };
 
-        struct Upload_Buffer* constant_upload_buffer = 0;
         {
             Mat4 camera_translation = Translate(camera_position);
             Mat4 camera_rotation_yaw = Rotate_RH(AngleDeg(camera_yaw), (Vec3){ 0.0f, 1.0f, 0.0f });
@@ -283,9 +282,10 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
                 .model_to_world = M4D(1.0f),
                 .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform))
             };
-            device_create_upload_buffer(device, &constant, sizeof(struct Constant), &constant_upload_buffer);
+            struct Constant* constant_buffer_ptr = command_list_map_buffer(command_list, constant_buffer);
+            memcpy(constant_buffer_ptr, &constant, sizeof(struct Constant));
+            command_list_unmap_buffer(command_list, constant_buffer);
         }
-        command_list_copy_upload_buffer_to_buffer(command_list, constant_upload_buffer, constant_buffer);
         
         command_list_set_pipeline_state_object(command_list, pipeline_state_object);
         command_list_set_shader(command_list, shader);
@@ -305,9 +305,6 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_close(command_list);
 
         command_queue_execute(command_queue, &command_list, 1);
-
-        upload_buffer_destroy(constant_upload_buffer);
-        
         swapchain_present(swapchain);
         
         // Sleep(2);
