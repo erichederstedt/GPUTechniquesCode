@@ -50,8 +50,5 @@ float4 PSMain(vs_out In) : SV_TARGET
 {
     float4 color = color_texture.Sample(Sampler, In.uv);
 
-    if (color.a < 0.5f)
-        discard;
-
     return color;
 }
