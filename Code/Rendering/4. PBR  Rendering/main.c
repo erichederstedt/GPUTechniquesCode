@@ -601,7 +601,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
                 BIND_TYPE_DSV
             },
             .bind_types_count = 1,
-            .format = FORMAT_D24_UNORM_S8_UINT
+            .format = FORMAT_D24_UNORM_S8_UINT,
         };
         device_create_buffer(device, buffer_description, &depth_buffer);
         depth_buffers[i] = depth_buffer;
@@ -1024,7 +1024,6 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         }
         
         uint8_t* image_data = (uint8_t*)buffer; // After header
-        uint8_t* mip_ptr = image_data;
 
         int mip_count = (header->dwFlags & DDSD_MIPMAPCOUNT) ? header->dwMipMapCount : 1;
 
@@ -1038,29 +1037,62 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         buffer_desc.bind_types_count = 1;
         struct Buffer* texture_buffer = 0;
         device_create_buffer(device, buffer_desc, &texture_buffer);
+        buffer_set_name(texture_buffer, "testTexture");
+
+        struct Allocation_Info buffer_allocation_info = device_get_allocation_info(device, buffer_desc);
 
         struct Upload_Buffer* texture_upload_buffer = 0;
-        device_create_upload_buffer(device, 0, (buffer_desc.width * buffer_desc.height * format_bit_size(texture_format)) / 8, &texture_upload_buffer);
+        device_create_upload_buffer(device, 0, buffer_allocation_info.size, &texture_upload_buffer);
 
-        // @continue map texture_upload_buffer and upload this shit
+        uint8_t* mapped_ptr = upload_buffer_map(texture_upload_buffer);
+        size_t read_offset = 0;
+        size_t write_offset = 0;
         for (int mip = 0; mip < mip_count; ++mip) {
             int mip_width = max(1, header->dwWidth >> mip);
             int mip_height = max(1, header->dwHeight >> mip);
             size_t mip_size = format_compute_mip_size(texture_format, mip_width, mip_height);
+            size_t src_row_pitch = format_compute_pitch_size(texture_format, mip_width);
+            size_t dst_row_pitch = (src_row_pitch + 255) & ~255; // align to 256
 
-            // Process mip_ptr with size mip_size
-            mip_ptr += mip_size;
+            size_t row_count = mip_height;
+            if (format_is_block_compressed(texture_format))
+            { // block compressed formats use block rows instead of pixel rows
+                row_count = (mip_height + 3) / 4;
+            }
+
+            uint8_t* dst_mip = mapped_ptr + write_offset;
+            uint8_t* src_mip = image_data + read_offset;
+
+            for (int row = 0; row < row_count; ++row) {
+                memcpy(dst_mip + row * dst_row_pitch,
+                    src_mip + row * src_row_pitch,
+                    src_row_pitch);
+            }
+
+            read_offset  += src_row_pitch * row_count;
+            write_offset += dst_row_pitch * row_count;
+
+            // align to 512
+            write_offset = (write_offset + 511) & ~511;
+
             printf("Mip level: %d\n", mip);
             printf("Mip width: %d\n", mip_width);
             printf("Mip height: %d\n", mip_height);
             printf("Mip size: %zd\n", mip_size);
-
         }
+        upload_buffer_unmap(texture_upload_buffer);
 
-        __debugbreak();
-        if (1) return 0;
+        struct Command_List* upload_command_list = 0;
+        device_create_command_list(device, &upload_command_list);
+        command_list_reset(upload_command_list);
+
+        command_list_copy_upload_buffer_to_buffer(upload_command_list, texture_upload_buffer, texture_buffer);
+
+        command_list_close(upload_command_list);
+        command_queue_execute(command_queue, &upload_command_list, 1);
     }
     
+    #if 0
     char* asset_path = get_asset_path("Sponza.fbx");
     struct Node* scene_node = load_fbx(asset_path);
     scene_node->local_scale = V3(0.01f, 0.01f, 0.01f);
@@ -1078,6 +1110,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
 
         command_queue_execute(command_queue, &upload_command_list, 1);
     }
+    #endif
     
     Vec3 camera_position = { 0.0f, 0.0f, -1.0f };
     float camera_yaw = 0.0f;
@@ -1160,7 +1193,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         }
 
         command_list_set_constant_buffer(command_list, camera_cbv, 1);
-        draw_node(scene_node, device, command_list);
+        // draw_node(scene_node, device, command_list);
         
         command_list_set_buffer_state(command_list, render_target_view_get_buffer(backbuffer_rtv), RESOURCE_STATE_PRESENT);
         command_list_close(command_list);
