@@ -604,6 +604,21 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
         DDSD_LINEARSIZE =  0x80000,
         DDSD_DEPTH =       0x800000,
     };
+    enum DDS
+    {
+        DDS_FOURCC = 0x00000004,  // DDPF_FOURCC
+        DDS_RGB = 0x00000040,  // DDPF_RGB
+        DDS_RGBA = 0x00000041,  // DDPF_RGB | DDPF_ALPHAPIXELS
+        DDS_LUMINANCE = 0x00020000,  // DDPF_LUMINANCE
+        DDS_LUMINANCEA = 0x00020001,  // DDPF_LUMINANCE | DDPF_ALPHAPIXELS
+        DDS_ALPHAPIXELS = 0x00000001,  // DDPF_ALPHAPIXELS
+        DDS_ALPHA = 0x00000002,  // DDPF_ALPHA
+        DDS_PAL8 = 0x00000020,  // DDPF_PALETTEINDEXED8
+        DDS_PAL8A = 0x00000021,  // DDPF_PALETTEINDEXED8 | DDPF_ALPHAPIXELS
+        DDS_BUMPLUMINANCE = 0x00040000,  // DDPF_BUMPLUMINANCE
+        DDS_BUMPDUDV = 0x00080000,  // DDPF_BUMPDUDV
+        DDS_BUMPDUDVA = 0x00080001  // DDPF_BUMPDUDV | DDPF_ALPHAPIXELS
+    };
 
     DWORD* dwMagic = (DWORD*)buffer; dwMagic;
     buffer += sizeof(DWORD);
@@ -625,6 +640,7 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
 
     enum FORMAT texture_format = FORMAT_UNKNOWN;
     int pre_multiplied_alpha = 0;
+    unsigned int texture_array_size = 1;
 
     if (header->ddspf.dwFlags & DDPF_FOURCC && !header10)
     {
@@ -696,10 +712,165 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
     else if (!header10)
     {
         // Handle the pre-ddspf cluster fuck
+        #define IS_FORMAT(_dwFlags, _dwRGBBitCount, _dwRBitMask, _dwGBitMask, _dwBBitMask, _dwABitMask) (header->ddspf.dwFlags == _dwFlags && header->ddspf.dwRGBBitCount == _dwRGBBitCount && header->ddspf.dwRBitMask == _dwRBitMask && header->ddspf.dwGBitMask == _dwGBitMask && header->ddspf.dwBBitMask == _dwBBitMask && header->ddspf.dwABitMask == _dwABitMask)
+        if (IS_FORMAT(DDS_RGBA, 32, 0xff, 0xff00, 0xff0000, 0xff000000))
+        {
+            texture_format = FORMAT_R8G8B8A8_UNORM;
+        }
+        else if (IS_FORMAT(DDS_RGBA, 32, 0xffff, 0xffff0000, 0, 0))
+        {
+            texture_format = FORMAT_R16G16_UNORM;
+        }
+        else if (IS_FORMAT(DDS_RGBA, 32, 0x3ff, 0xffc00, 0x3ff00000, 0))
+        {
+            texture_format = FORMAT_R10G10B10A2_UNORM;
+        }
+        else if (IS_FORMAT(DDS_RGB, 32, 0xffff, 0xffff0000, 0, 0))
+        {
+            texture_format = FORMAT_R16G16_UNORM;
+        }
+        else if (IS_FORMAT(DDS_RGBA, 16, 0x7c00, 0x3e0, 0x1f, 0x8000))
+        {
+            texture_format = FORMAT_B5G5R5A1_UNORM;
+        }
+        else if (IS_FORMAT(DDS_RGB, 16, 0xf800, 0x7e0, 0x1f, 0))
+        {
+            texture_format = FORMAT_B5G6R5_UNORM;
+        }
+        else if (IS_FORMAT(DDS_ALPHA, 8, 0, 0, 0, 0xff))
+        {
+            texture_format = FORMAT_A8_UNORM;
+        }
+        else
+        {
+            printf("Unsupported format!\n");
+            __debugbreak();
+        }
+        #undef IS_FORMAT
     }
     else
     {
         // Handle format shit from header10
+        static enum FORMAT to_yara_format[DXGI_FORMAT_B4G4R4A4_UNORM+1] = {
+            FORMAT_UNKNOWN,
+            FORMAT_R32G32B32A32_TYPELESS,
+            FORMAT_R32G32B32A32_FLOAT,
+            FORMAT_R32G32B32A32_UINT,
+            FORMAT_R32G32B32A32_SINT,
+            FORMAT_R32G32B32_TYPELESS,
+            FORMAT_R32G32B32_FLOAT,
+            FORMAT_R32G32B32_UINT,
+            FORMAT_R32G32B32_SINT,
+            FORMAT_R16G16B16A16_TYPELESS,
+            FORMAT_R16G16B16A16_FLOAT,
+            FORMAT_R16G16B16A16_UNORM,
+            FORMAT_R16G16B16A16_UINT,
+            FORMAT_R16G16B16A16_SNORM,
+            FORMAT_R16G16B16A16_SINT,
+            FORMAT_R32G32_TYPELESS,
+            FORMAT_R32G32_FLOAT,
+            FORMAT_R32G32_UINT,
+            FORMAT_R32G32_SINT,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_R10G10B10A2_TYPELESS,
+            FORMAT_R10G10B10A2_UNORM,
+            FORMAT_R10G10B10A2_UINT,
+            FORMAT_R11G11B10_FLOAT,
+            FORMAT_R8G8B8A8_TYPELESS,
+            FORMAT_R8G8B8A8_UNORM,
+            FORMAT_R8G8B8A8_UNORM_SRGB,
+            FORMAT_R8G8B8A8_UINT,
+            FORMAT_R8G8B8A8_SNORM,
+            FORMAT_R8G8B8A8_SINT,
+            FORMAT_R16G16_TYPELESS,
+            FORMAT_R16G16_FLOAT,
+            FORMAT_R16G16_UNORM,
+            FORMAT_R16G16_UINT,
+            FORMAT_R16G16_SNORM,
+            FORMAT_R16G16_SINT,
+            FORMAT_R32_TYPELESS,
+            FORMAT_D32_FLOAT,
+            FORMAT_R32_FLOAT,
+            FORMAT_R32_UINT,
+            FORMAT_R32_SINT,
+            FORMAT_R24G8_TYPELESS,
+            FORMAT_D24_UNORM_S8_UINT,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_R8G8_TYPELESS,
+            FORMAT_R8G8_UNORM,
+            FORMAT_R8G8_UINT,
+            FORMAT_R8G8_SNORM,
+            FORMAT_R8G8_SINT,
+            FORMAT_R16_TYPELESS,
+            FORMAT_R16_FLOAT,
+            FORMAT_D16_UNORM,
+            FORMAT_R16_UNORM,
+            FORMAT_R16_UINT,
+            FORMAT_R16_SNORM,
+            FORMAT_R16_SINT,
+            FORMAT_R8_TYPELESS,
+            FORMAT_R8_UNORM,
+            FORMAT_R8_UINT,
+            FORMAT_R8_SNORM,
+            FORMAT_R8_SINT,
+            FORMAT_A8_UNORM,
+            FORMAT_R1_UNORM,
+            FORMAT_R9G9B9E5_SHAREDEXP,
+            FORMAT_R8G8_B8G8_UNORM,
+            FORMAT_G8R8_G8B8_UNORM,
+            FORMAT_BC1_TYPELESS,
+            FORMAT_BC1_UNORM,
+            FORMAT_BC1_UNORM_SRGB,
+            FORMAT_BC2_TYPELESS,
+            FORMAT_BC2_UNORM,
+            FORMAT_BC2_UNORM_SRGB,
+            FORMAT_BC3_TYPELESS,
+            FORMAT_BC3_UNORM,
+            FORMAT_BC3_UNORM_SRGB,
+            FORMAT_BC4_TYPELESS,
+            FORMAT_BC4_UNORM,
+            FORMAT_BC4_SNORM,
+            FORMAT_BC5_TYPELESS,
+            FORMAT_BC5_UNORM,
+            FORMAT_BC5_SNORM,
+            FORMAT_B5G6R5_UNORM,
+            FORMAT_B5G5R5A1_UNORM,
+            FORMAT_B8G8R8A8_UNORM,
+            FORMAT_B8G8R8X8_UNORM,
+            FORMAT_UNKNOWN,
+            FORMAT_B8G8R8A8_TYPELESS,
+            FORMAT_B8G8R8A8_UNORM_SRGB,
+            FORMAT_B8G8R8X8_TYPELESS,
+            FORMAT_B8G8R8X8_UNORM_SRGB,
+            FORMAT_BC6H_TYPELESS,
+            FORMAT_BC6H_UF16,
+            FORMAT_BC6H_SF16,
+            FORMAT_BC7_TYPELESS,
+            FORMAT_BC7_UNORM,
+            FORMAT_BC7_UNORM_SRGB,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_UNKNOWN,
+            FORMAT_B4G4R4A4_UNORM
+        };
+        texture_format = to_yara_format[header10->dxgiFormat];
+        texture_array_size = header10->arraySize;
 
         /*
         for (int iArrayElement = 0; iArrayElement < header10->arraySize; iArrayElement++)
@@ -713,18 +884,18 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
     
     uint8_t* image_data = (uint8_t*)buffer; // After header
 
-    int mip_count = (header->dwFlags & DDSD_MIPMAPCOUNT) ? header->dwMipMapCount : 1;
+    unsigned int mip_count = (header->dwFlags & DDSD_MIPMAPCOUNT) ? header->dwMipMapCount : 1;
 
     struct Buffer_Descriptor buffer_desc = {0};
-    buffer_desc.width = (unsigned long long)header->dwWidth;
-    buffer_desc.height = (unsigned long long)header->dwHeight;
+    buffer_desc.width = (unsigned long long)(((header->dwWidth) + (4) - 1) & ~((4) - 1));
+    buffer_desc.height = (unsigned long long)(((header->dwHeight) + (4) - 1) & ~((4) - 1));
     buffer_desc.mip_count = mip_count;
     buffer_desc.format = texture_format;
     buffer_desc.buffer_type = BUFFER_TYPE_TEXTRUE2D;
     buffer_desc.bind_types[0] = BIND_TYPE_SRV;
     buffer_desc.bind_types_count = 1;
     device_create_buffer(device, buffer_desc, &texture->buffer);
-    buffer_set_name(texture->buffer, "testTexture");
+    buffer_set_name(texture->buffer, texture->path);
     device_create_shader_resource_view(device, 0, cbv_srv_uav_descriptor_set, texture->buffer, &texture->srv);
 
     struct Allocation_Info buffer_allocation_info = device_get_allocation_info(device, buffer_desc);
@@ -735,38 +906,43 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
     uint8_t* mapped_ptr = upload_buffer_map(texture_upload_buffer);
     size_t read_offset = 0;
     size_t write_offset = 0;
-    for (int mip = 0; mip < mip_count; ++mip) {
-        int mip_width = max(1, header->dwWidth >> mip);
-        int mip_height = max(1, header->dwHeight >> mip);
-        size_t mip_size = format_compute_mip_size(texture_format, mip_width, mip_height);
-        size_t src_row_pitch = format_compute_row_pitch_size(texture_format, mip_width);
-        size_t dst_row_pitch = (src_row_pitch + 255) & ~255; // align to 256
+    for (unsigned int array_element = 0; array_element < texture_array_size; array_element++)
+    {
+        for (unsigned int mip = 0; mip < mip_count; ++mip)
+        {
+            int mip_width = max(1, header->dwWidth >> mip);
+            int mip_height = max(1, header->dwHeight >> mip);
+            size_t mip_size = format_compute_mip_size(texture_format, mip_width, mip_height);
+            size_t src_row_pitch = format_compute_row_pitch_size(texture_format, mip_width);
+            size_t dst_row_pitch = (src_row_pitch + 255) & ~255; // align to 256
 
-        size_t row_count = mip_height;
-        if (format_is_block_compressed(texture_format))
-        { // block compressed formats use block rows instead of pixel rows
-            row_count = (mip_height + 3) / 4;
+            size_t row_count = mip_height;
+            if (format_is_block_compressed(texture_format))
+            { // block compressed formats use block rows instead of pixel rows
+                row_count = (mip_height + 3) / 4;
+            }
+
+            uint8_t* dst_mip = mapped_ptr + write_offset;
+            uint8_t* src_mip = image_data + read_offset;
+
+            for (int row = 0; row < row_count; ++row)
+            {
+                memcpy(dst_mip + row * dst_row_pitch,
+                    src_mip + row * src_row_pitch,
+                    src_row_pitch);
+            }
+
+            read_offset  += src_row_pitch * row_count;
+            write_offset += dst_row_pitch * row_count;
+
+            // align to 512
+            write_offset = (write_offset + 511) & ~511;
+
+            printf("Mip level: %d\n", mip);
+            printf("Mip width: %d\n", mip_width);
+            printf("Mip height: %d\n", mip_height);
+            printf("Mip size: %zd\n", mip_size);
         }
-
-        uint8_t* dst_mip = mapped_ptr + write_offset;
-        uint8_t* src_mip = image_data + read_offset;
-
-        for (int row = 0; row < row_count; ++row) {
-            memcpy(dst_mip + row * dst_row_pitch,
-                src_mip + row * src_row_pitch,
-                src_row_pitch);
-        }
-
-        read_offset  += src_row_pitch * row_count;
-        write_offset += dst_row_pitch * row_count;
-
-        // align to 512
-        write_offset = (write_offset + 511) & ~511;
-
-        printf("Mip level: %d\n", mip);
-        printf("Mip width: %d\n", mip_width);
-        printf("Mip height: %d\n", mip_height);
-        printf("Mip size: %zd\n", mip_size);
     }
     upload_buffer_unmap(texture_upload_buffer);
 
@@ -784,7 +960,7 @@ void load_texture(struct Texture *texture, struct Device *device, struct Descrip
     if (strcmp(extension, ".png") == 0)
         load_texture_png(texture, device, cbv_srv_uav_descriptor_set, upload_command_list);
     else if (strcmp(extension, ".dds") == 0)
-        return;
+        load_texture_dds(texture, device, cbv_srv_uav_descriptor_set, upload_command_list);
 }
 
 void upload_node_buffers(struct Node *node, struct Device *device, struct Command_List *upload_command_list, struct Descriptor_Set *cbv_srv_uav_descriptor_set)
@@ -1105,6 +1281,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_constant_buffer_view(device, 0, cbv_srv_uav_descriptor_set, camera_constant_buffer, &camera_cbv);
     }
 
+    #if 0
     {
         char* asset_path = get_asset_path("textures/Awnings_Beams_BaseColor.dds");
 
@@ -1485,9 +1662,11 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_close(upload_command_list);
         command_queue_execute(command_queue, &upload_command_list, 1);
     }
+    #endif
     
     #if 1
-    char* asset_path = get_asset_path("Sponza.fbx");
+    // char* asset_path = get_asset_path("Sponza.fbx");
+    char* asset_path = get_asset_path("BistroExterior.fbx");
     struct Node* scene_node = load_fbx(asset_path);
     scene_node->local_scale = V3(0.01f, 0.01f, 0.01f);
     free(asset_path);
@@ -1587,7 +1766,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         }
 
         command_list_set_constant_buffer(command_list, camera_cbv, 1);
-        // draw_node(scene_node, device, command_list);
+        draw_node(scene_node, device, command_list);
         
         command_list_set_buffer_state(command_list, render_target_view_get_buffer(backbuffer_rtv), RESOURCE_STATE_PRESENT);
         command_list_close(command_list);
