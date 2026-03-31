@@ -42,7 +42,7 @@ vs_out VSMain(vs_in In)
     Out.ws_tangent = normalize(mul(model_to_world, float4(In.tangent, 0.0)));
     Out.ws_bitangent = normalize(mul(model_to_world, float4(In.bitangent, 0.0)));
     Out.color = In.color;
-    In.uv.y = In.uv.y;
+    In.uv.y = 1.0 - In.uv.y;
     Out.uv = In.uv;
     
     return Out;
