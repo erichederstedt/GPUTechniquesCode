@@ -882,15 +882,6 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
         };
         texture_format = to_yara_format[header10->dxgiFormat];
         texture_array_size = header10->arraySize;
-
-        /*
-        for (int iArrayElement = 0; iArrayElement < header10->arraySize; iArrayElement++)
-        {
-            for (int iMipLevel = 0; iMipLevel < header->dwMipMapCount; iMipLevel++)
-            {
-            }
-        } 
-        */
     }
     
     uint8_t* image_data = (uint8_t*)buffer; // After header
