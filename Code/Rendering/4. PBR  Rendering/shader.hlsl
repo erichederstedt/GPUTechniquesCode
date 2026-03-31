@@ -56,12 +56,5 @@ SamplerState Sampler : register(s0)
 };
 float4 PSMain(vs_out In) : SV_TARGET
 {
-    float4 color = color_texture.Sample(Sampler, In.uv);
-
-    // if (color.a < 0.5f)
-        // discard;
-
-    color.rgb = (In.ws_normal.rgb);
-    color.a = 1.0;
-    return color;
+    return color_texture.Sample(Sampler, In.uv);
 }

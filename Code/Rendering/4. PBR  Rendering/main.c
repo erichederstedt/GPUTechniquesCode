@@ -1254,9 +1254,16 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     for (int i = 0; i < 8; ++i)
     {
         pipeline_state_object_descriptor.blend_descriptor.render_target_blend_descriptors[i] = (struct Render_Target_Blend_Descriptor){
-            .blend_enable = 0,
+            .blend_enable = 1,
             .logic_op_enable = 0,
-            .render_target_write_mask = COLOR_WRITE_ENABLE_ALL
+            .src_blend_type = BLEND_TYPE_SRC_ALPHA,
+            .src_blend_type_alpha = BLEND_TYPE_ONE,
+            .dest_blend_type = BLEND_TYPE_INV_SRC_ALPHA,
+            .blend_op = BLEND_OP_ADD,
+            .logic_op = LOGIC_OP_NOOP,
+            .dest_blend_type_alpha = BLEND_TYPE_INV_SRC_ALPHA,
+            .blend_op_alpha = BLEND_OP_ADD,
+            .render_target_write_mask = 0x0F
         };
     }
     struct Pipeline_State_Object* pipeline_state_object = 0;
