@@ -335,8 +335,19 @@ struct Node* load_node(ufbx_node* fbx_node, struct Node* root, ufbx_scene* fbx_s
 }
 struct Node* load_fbx(char* path)
 {
-    ufbx_load_opts opts = { 0 };
-    // opts.generate_missing_normals = true;
+    ufbx_load_opts opts = {
+        .target_axes = {
+			.right = UFBX_COORDINATE_AXIS_POSITIVE_X,
+			.up = UFBX_COORDINATE_AXIS_POSITIVE_Y,
+			.front = UFBX_COORDINATE_AXIS_NEGATIVE_Z, // Could be UFBX_COORDINATE_AXIS_POSITIVE_Z
+		},
+		.target_unit_meters = 1.0f,
+        .generate_missing_normals = TRUE,
+        .handedness_conversion_axis = UFBX_MIRROR_AXIS_X, // Might need to be omited.
+        .handedness_conversion_retain_winding = TRUE,
+        .reverse_winding = TRUE,
+        .space_conversion = UFBX_SPACE_CONVERSION_MODIFY_GEOMETRY
+    };
     ufbx_error error;
     ufbx_scene *fbx_scene = ufbx_load_file(path, &opts, &error);
     if (!fbx_scene)
@@ -1283,7 +1294,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     
     char* asset_path = get_asset_path("BistroExterior.fbx");
     struct Node* scene_node = load_fbx(asset_path);
-    scene_node->local_scale = V3(0.01f, 0.01f, 0.01f);
+    scene_node->local_scale = V3(1.0f, 1.0f, 1.0f);
     free(asset_path);
 
     {
