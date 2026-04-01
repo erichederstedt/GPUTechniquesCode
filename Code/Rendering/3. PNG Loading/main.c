@@ -500,37 +500,6 @@ void draw_node(struct Node* node, struct Device* device, struct Command_List* co
     }
 }
 
-Vec3 Mat4_ExtractEulerYXZ(const Mat4* m)
-{
-    Vec3 angles;
-
-    float m00 = m->Elements[0][0];
-    float m01 = m->Elements[0][1];
-    float m02 = m->Elements[0][2];
-    // float m10 = m->Elements[1][0];
-    float m11 = m->Elements[1][1];
-    // float m12 = m->Elements[1][2];
-    float m20 = m->Elements[2][0];
-    float m21 = m->Elements[2][1];
-    float m22 = m->Elements[2][2];
-
-    // Pitch (X-axis rotation)
-    angles.X = asinf(-m21);
-
-    if (fabsf(m21) < 0.9999f) {
-        // Yaw (Y-axis rotation)
-        angles.Y = atan2f(m20, m22);
-        // Roll (Z-axis rotation)
-        angles.Z = atan2f(m01, m11);
-    } else {
-        // Gimbal lock case
-        angles.Y = atan2f(-m02, m00);
-        angles.Z = 0.0f;
-    }
-
-    return angles;
-}
-
 int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
 {
     SetCpuAndThreadPriority();
