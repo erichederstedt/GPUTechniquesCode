@@ -1258,6 +1258,55 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
 
         device_create_constant_buffer_view(device, 0, cbv_srv_uav_descriptor_set, camera_constant_buffer, &camera_cbv);
     }
+
+    enum LIGHT_TYPE
+    {
+        LIGHT_TYPE_POINT,
+        LIGHT_TYPE_SPOT,
+        LIGHT_TYPE_DIRECTIONAL
+    };
+    #pragma pack(push, 16)
+    struct Light_Info
+    {
+        enum LIGHT_TYPE type;
+        Vec4 color;
+        Vec3 pos;
+        float radius;
+        Vec3 dir;
+        float inner_cone_angle;
+        float outer_cone_angle;
+    };
+    #pragma pack(pop)
+    struct Light_Info lights[8] = {{
+        .type = LIGHT_TYPE_DIRECTIONAL,
+        .color = V4(1.0f, 1.0f, 1.0f, 1.0f),
+        .dir = NormV3(V3(-1.0f, -1.0f, -1.0f))
+    }};
+    struct Buffer* light_buffer = 0;
+    struct Shader_Resource_View* light_srv = 0;
+    {
+        struct Buffer_Descriptor buffer_description = {
+            .width = sizeof(struct Light_Info) * ARRAYSIZE(lights),
+            .height = 1,
+            .buffer_type = BUFFER_TYPE_BUFFER,
+            .bind_types = {
+                BIND_TYPE_SRV
+            },
+            .bind_types_count = 1
+        };
+        device_create_buffer(device, buffer_description, &light_buffer);
+
+        struct Shader_Resource_View_Descriptor srv_desc = {
+            .buffer_type = BUFFER_TYPE_BUFFER,
+            .buffer_info = {
+                .buffer = {
+                    .element_count = ARRAYSIZE(lights),
+                    .element_stride_bytes = sizeof(struct Light_Info)
+                }
+            }
+        };
+        device_create_shader_resource_view(device, &srv_desc, cbv_srv_uav_descriptor_set, light_buffer, &light_srv);
+    }
     
     char* asset_path = get_asset_path("BistroExterior.fbx");
     struct Node* scene_node = load_fbx(asset_path);
@@ -1282,7 +1331,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     float camera_pitch = 0.0f;
     Mat4 camera_transform = M4D(1.0f);
     
-    double frame_time_buffer[1024] = {0};
+    double frame_time_buffer[32] = {0};
     int frame_time_buffer_count = 0;
     double frame_time = 0.0f;
     unsigned long long frame_counter = 0;
@@ -1359,6 +1408,13 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             command_list_unmap_buffer(command_list, camera_constant_buffer);
         }
 
+        {
+            struct Light_Info* light_buffer_ptr = command_list_map_buffer(command_list, light_buffer);
+            memcpy(light_buffer_ptr, &lights, sizeof(struct Light_Info) * ARRAYSIZE(lights));
+            command_list_unmap_buffer(command_list, light_buffer);
+        }
+
+        command_list_set_texture_buffer(command_list, light_srv, 3);
         command_list_set_constant_buffer(command_list, camera_cbv, 1);
         draw_node(scene_node, device, command_list);
         

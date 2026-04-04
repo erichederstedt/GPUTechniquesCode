@@ -19,6 +19,18 @@ struct vs_out
     float2 uv : UV;
 };
 
+struct Light_Info
+{
+    uint type;
+    float4 color;
+    float3 pos;
+    float radius;
+    float3 dir;
+    float inner_cone_angle;
+    float outer_cone_angle;
+};
+StructuredBuffer<Light_Info> light_buffer : register(t1);
+
 cbuffer model_cbuffer : register(b0)
 {
     float4x4 model_to_world;
@@ -31,7 +43,7 @@ cbuffer camera_cbuffer : register(b1)
 
 Texture2D color_texture : register(t0);
 
-[RootSignature("RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), CBV(b0), CBV(b1), DescriptorTable(SRV(t0)), StaticSampler(s0)")]
+[RootSignature("RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), CBV(b0), CBV(b1), DescriptorTable(SRV(t0)), DescriptorTable(SRV(t1)), StaticSampler(s0)")]
 vs_out VSMain(vs_in In)
 {
     vs_out Out;
