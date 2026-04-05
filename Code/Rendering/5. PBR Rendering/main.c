@@ -13,6 +13,9 @@
 #include "ufbx.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#pragma warning(push, 0)
+#include "mikktspace.c"
+#pragma warning(pop)
 
 static int DoneRunning;
 
@@ -157,8 +160,7 @@ struct Vertex
     Vec3 pos;
     Vec4 color;
     Vec3 normal;
-    Vec3 tangent;
-    Vec3 bitangent;
+    Vec4 tangent;
     Vec2 uv;
 };
 #pragma pack(pop)
@@ -177,7 +179,42 @@ struct Mesh_Part
     struct Constant_Buffer_View* cbv;
 
     struct Texture* color_texture;
+    struct Texture* normal_texture;
 };
+int mikkt_get_num_faces(const SMikkTSpaceContext *ctx) {
+    struct Mesh_Part *mesh = (struct Mesh_Part*)ctx->m_pUserData;
+    return (int)mesh->index_count / 3;
+}
+int mikkt_get_num_vertices_of_face(const SMikkTSpaceContext *ctx, int face) {
+    (void)ctx; (void)face;
+    return 3; // all triangles
+}
+void mikkt_get_position(const SMikkTSpaceContext *ctx, float out[], int face, int vert) {
+    struct Mesh_Part *mesh = (struct Mesh_Part*)ctx->m_pUserData;
+    int idx = mesh->index_array[face * 3 + vert];
+    memcpy(out, mesh->vertex_array[idx].pos.Elements, sizeof(float) * 3);
+}
+void mikkt_get_normal(const SMikkTSpaceContext *ctx, float out[], int face, int vert) {
+    struct Mesh_Part *mesh = (struct Mesh_Part*)ctx->m_pUserData;
+    int idx = mesh->index_array[face * 3 + vert];
+    memcpy(out, mesh->vertex_array[idx].normal.Elements, sizeof(float) * 3);
+}
+void mikkt_get_tex_coord(const SMikkTSpaceContext *ctx, float out[], int face, int vert) {
+    struct Mesh_Part *mesh = (struct Mesh_Part*)ctx->m_pUserData;
+    int idx = mesh->index_array[face * 3 + vert];
+    // out[0] = mesh->vertex_array[idx].uv.Elements[0];
+    // out[1] = mesh->vertex_array[idx].uv.Elements[1];
+    // out[1] = 1.0f - mesh->vertex_array[idx].uv.Elements[1];
+    memcpy(out, mesh->vertex_array[idx].uv.Elements, sizeof(float) * 2);
+}
+void mikkt_set_t_space_basic(const SMikkTSpaceContext *ctx, const float tangent[], float sign, int face, int vert) {
+    struct Mesh_Part *mesh = (struct Mesh_Part*)ctx->m_pUserData;
+    int idx = mesh->index_array[face * 3 + vert];
+    mesh->vertex_array[idx].tangent.Elements[0] = tangent[0];
+    mesh->vertex_array[idx].tangent.Elements[1] = tangent[1];
+    mesh->vertex_array[idx].tangent.Elements[2] = tangent[2];
+    mesh->vertex_array[idx].tangent.Elements[3] = sign; // bitangent = cross(normal, tangent) * sign
+}
 struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part, size_t material_index, struct Node* node)
 {
     size_t num_triangles = part->num_triangles;
@@ -221,11 +258,7 @@ struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part, size_t ma
             {
                 ufbx_vec3 tangent = ufbx_get_vertex_vec3(&mesh->vertex_tangent, index);
                 conv_float(tangent, v->tangent);
-            }
-            if (mesh->vertex_bitangent.exists)
-            {
-                ufbx_vec3 bitangent = ufbx_get_vertex_vec3(&mesh->vertex_bitangent, index);
-                conv_float(bitangent, v->bitangent);
+                v->tangent.W = (float)ufbx_get_vertex_w_vec3(&mesh->vertex_tangent, index);
             }
             if (mesh->vertex_uv.exists)
             {
@@ -252,12 +285,38 @@ struct Mesh_Part load_mesh_part(ufbx_mesh *mesh, ufbx_mesh_part *part, size_t ma
     mesh_part.vertex_array = vertices;
     mesh_part.vertex_count = num_vertices;
 
+    // Generate tangents
+    if (!mesh->vertex_tangent.exists && mesh_part.index_count > 0 && mesh_part.vertex_count > 0)
+    {
+        SMikkTSpaceInterface mikkt_interface = {0};
+        mikkt_interface.m_getNumFaces          = mikkt_get_num_faces;
+        mikkt_interface.m_getNumVerticesOfFace = mikkt_get_num_vertices_of_face;
+        mikkt_interface.m_getPosition          = mikkt_get_position;
+        mikkt_interface.m_getNormal            = mikkt_get_normal;
+        mikkt_interface.m_getTexCoord          = mikkt_get_tex_coord;
+        mikkt_interface.m_setTSpaceBasic       = mikkt_set_t_space_basic;
+        // mikkt_interface.m_setTSpace         = NULL;  // use setTSpaceBasic instead
+        
+        SMikkTSpaceContext ctx = {0};
+        ctx.m_pInterface = &mikkt_interface;
+        ctx.m_pUserData  = &mesh_part;
+        if (!genTangSpaceDefault(&ctx)) {
+            fprintf(stderr, "MikkTSpace failed!\n");
+            __debugbreak();
+        }
+    }
+
     mesh->materials.data[0]->pbr.base_color.texture;
+    mesh->materials.data[0]->pbr.normal_map.texture;
     for (size_t i = 0; i < node->texture_count; i++)
     {
         if (mesh->materials.data[material_index]->pbr.base_color.texture && strcmp(mesh->materials.data[material_index]->pbr.base_color.texture->filename.data, node->texture_array[i].path) == 0)
         {
             mesh_part.color_texture = &node->texture_array[i];
+        }
+        if (mesh->materials.data[material_index]->pbr.normal_map.texture && strcmp(mesh->materials.data[material_index]->pbr.normal_map.texture->filename.data, node->texture_array[i].path) == 0)
+        {
+            mesh_part.normal_texture = &node->texture_array[i];
         }
     }
 
@@ -346,7 +405,8 @@ struct Node* load_fbx(char* path)
         .handedness_conversion_axis = UFBX_MIRROR_AXIS_X, // Might need to be omited.
         .handedness_conversion_retain_winding = TRUE,
         .reverse_winding = TRUE,
-        .space_conversion = UFBX_SPACE_CONVERSION_MODIFY_GEOMETRY
+        .space_conversion = UFBX_SPACE_CONVERSION_MODIFY_GEOMETRY,
+        .retain_vertex_attrib_w = TRUE
     };
     ufbx_error error;
     ufbx_scene *fbx_scene = ufbx_load_file(path, &opts, &error);
@@ -1070,7 +1130,9 @@ void draw_node(struct Node* node, struct Device* device, struct Command_List* co
 
             command_list_set_constant_buffer(command_list, mesh_part->cbv, 0);
             if (mesh_part->color_texture)
-                command_list_set_texture_buffer(command_list, mesh_part->color_texture->srv, 2);
+                command_list_set_texture_buffer(command_list, mesh_part->color_texture->srv, 3);
+            if (mesh_part->normal_texture)
+                command_list_set_texture_buffer(command_list, mesh_part->normal_texture->srv, 4);
             command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             command_list_set_vertex_buffer(command_list, mesh_part->vertex_buffer, sizeof(struct Vertex) * mesh_part->vertex_count, sizeof(struct Vertex));
             command_list_set_index_buffer(command_list, mesh_part->index_buffer, sizeof(unsigned int) * mesh_part->index_count, FORMAT_R32_UINT);
@@ -1172,15 +1234,9 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         },
         {
             .element_binding.name = "TANGENT",
-            .format = FORMAT_R32G32B32_FLOAT,
+            .format = FORMAT_R32G32B32A32_FLOAT,
             .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
             .offset = offsetof(struct Vertex, tangent)
-        },
-        {
-            .element_binding.name = "BITANGENT",
-            .format = FORMAT_R32G32B32_FLOAT,
-            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
-            .offset = offsetof(struct Vertex, bitangent)
         },
         {
             .element_binding.name = "UV",
@@ -1238,15 +1294,19 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     struct Pipeline_State_Object* pipeline_state_object = 0;
     device_create_pipeline_state_object(device, pipeline_state_object_descriptor, &pipeline_state_object);
 
-    struct Camera_Constant
+    #pragma pack(push, 1)
+    struct Main_Constant
     {
         Mat4 world_to_clip;
+        Vec3 camera_position;
+        unsigned int lights;
     };
+    #pragma pack(pop)
     struct Buffer* camera_constant_buffer = 0;
     struct Constant_Buffer_View* camera_cbv = 0;
     {
         struct Buffer_Descriptor buffer_description = {
-            .width = sizeof(struct Camera_Constant),
+            .width = sizeof(struct Main_Constant),
             .height = 1,
             .buffer_type = BUFFER_TYPE_BUFFER,
             .bind_types = {
@@ -1265,16 +1325,22 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         LIGHT_TYPE_SPOT,
         LIGHT_TYPE_DIRECTIONAL
     };
-    #pragma pack(push, 16)
+    #pragma pack(push, 1)
     struct Light_Info
     {
         enum LIGHT_TYPE type;
+        float pad0;
+        float pad1;
+        float pad2;
         Vec4 color;
         Vec3 pos;
         float radius;
         Vec3 dir;
         float inner_cone_angle;
         float outer_cone_angle;
+        float pad3;
+        float pad4;
+        float pad5;
     };
     #pragma pack(pop)
     struct Light_Info lights[8] = {{
@@ -1308,7 +1374,12 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_shader_resource_view(device, &srv_desc, cbv_srv_uav_descriptor_set, light_buffer, &light_srv);
     }
     
+    #define BISTRO
+    #ifdef BISTRO
     char* asset_path = get_asset_path("BistroExterior.fbx");
+    #else
+    char* asset_path = get_asset_path("NewSponza_Main_Yup_003.fbx");
+    #endif
     struct Node* scene_node = load_fbx(asset_path);
     scene_node->local_scale = V3(1.0f, 1.0f, 1.0f);
     free(asset_path);
@@ -1326,9 +1397,15 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_queue_execute(command_queue, &upload_command_list, 1);
     }
     
-    Vec3 camera_position = { 0.0f, 0.0f, -1.0f };
-    float camera_yaw = 0.0f;
-    float camera_pitch = 0.0f;
+    #ifdef BISTRO
+    Vec3 camera_position = { -3.38430858f, 2.55671954f, -1.69763803f };
+    float camera_yaw = -47.7283516f;
+    float camera_pitch = 21.6109619f;
+    #else
+    Vec3 camera_position = { 3.18551230f, 3.31043482f, 3.04728985f };
+    float camera_yaw = 227.332336f;
+    float camera_pitch = 38.3568611f;
+    #endif
     Mat4 camera_transform = M4D(1.0f);
     
     double frame_time_buffer[32] = {0};
@@ -1400,21 +1477,23 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             Mat4 camera_rotation_pitch = Rotate_RH(AngleDeg(camera_pitch), (Vec3){ 1.0f, 0.0f, 0.0f });
             camera_transform = MulM4(camera_translation, MulM4(camera_rotation_yaw, camera_rotation_pitch));
             Mat4 camera_projection = Perspective_LH_ZO(AngleDeg(70.0f), 16.0f/9.0f, 0.1f, 1000.0f);
-            struct Camera_Constant constant = { 
-                .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform))
+            struct Main_Constant constant = { 
+                .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform)),
+                .camera_position = camera_position,
+                .lights = 1
             };
             struct Constant* constant_buffer_ptr = command_list_map_buffer(command_list, camera_constant_buffer);
-            memcpy(constant_buffer_ptr, &constant, sizeof(struct Camera_Constant));
+            memcpy(constant_buffer_ptr, &constant, sizeof(struct Main_Constant));
             command_list_unmap_buffer(command_list, camera_constant_buffer);
         }
 
         {
             struct Light_Info* light_buffer_ptr = command_list_map_buffer(command_list, light_buffer);
-            memcpy(light_buffer_ptr, &lights, sizeof(struct Light_Info) * ARRAYSIZE(lights));
+            memcpy(light_buffer_ptr, lights, sizeof(struct Light_Info) * ARRAYSIZE(lights));
             command_list_unmap_buffer(command_list, light_buffer);
         }
 
-        command_list_set_texture_buffer(command_list, light_srv, 3);
+        command_list_set_texture_buffer(command_list, light_srv, 2);
         command_list_set_constant_buffer(command_list, camera_cbv, 1);
         draw_node(scene_node, device, command_list);
         
