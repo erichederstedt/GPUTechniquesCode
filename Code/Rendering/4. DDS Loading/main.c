@@ -762,7 +762,7 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
     else
     {
         // Handle format shit from header10
-        static enum FORMAT to_yara_format[DXGI_FORMAT_B4G4R4A4_UNORM+1] = {
+        static enum FORMAT dxgi_to_yara_format[DXGI_FORMAT_B4G4R4A4_UNORM+1] = {
             FORMAT_UNKNOWN,
             FORMAT_R32G32B32A32_TYPELESS,
             FORMAT_R32G32B32A32_FLOAT,
@@ -880,7 +880,7 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
             FORMAT_UNKNOWN,
             FORMAT_B4G4R4A4_UNORM
         };
-        texture_format = to_yara_format[header10->dxgiFormat];
+        texture_format = dxgi_to_yara_format[header10->dxgiFormat];
         texture_array_size = header10->arraySize;
     }
     
@@ -889,8 +889,13 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
     unsigned int mip_count = (header->dwFlags & DDSD_MIPMAPCOUNT) ? header->dwMipMapCount : 1;
 
     struct Buffer_Descriptor buffer_desc = {0};
-    buffer_desc.width = (unsigned long long)(((header->dwWidth) + (4) - 1) & ~((4) - 1));
-    buffer_desc.height = (unsigned long long)(((header->dwHeight) + (4) - 1) & ~((4) - 1));
+    if (format_is_block_compressed(texture_format)) {
+        buffer_desc.width = (header->dwWidth + 3) & ~3;
+        buffer_desc.height = (header->dwHeight + 3) & ~3;
+    } else {
+        buffer_desc.width  = header->dwWidth;
+        buffer_desc.height = header->dwHeight;
+    }
     buffer_desc.mip_count = mip_count;
     buffer_desc.format = texture_format;
     buffer_desc.buffer_type = BUFFER_TYPE_TEXTRUE2D;
@@ -906,8 +911,7 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
     device_create_upload_buffer(device, 0, buffer_allocation_info.size, &texture_upload_buffer);
 
     uint8_t* mapped_ptr = upload_buffer_map(texture_upload_buffer);
-    size_t read_offset = 0;
-    size_t write_offset = 0;
+    size_t offset = 0;
     for (unsigned int array_element = 0; array_element < texture_array_size; array_element++)
     {
         for (unsigned int mip = 0; mip < mip_count; ++mip)
@@ -915,30 +919,8 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
             int mip_width = max(1, header->dwWidth >> mip);
             int mip_height = max(1, header->dwHeight >> mip);
             size_t mip_size = format_compute_mip_size(texture_format, mip_width, mip_height);
-            size_t src_row_pitch = format_compute_row_pitch_size(texture_format, mip_width);
-            size_t dst_row_pitch = (src_row_pitch + 255) & ~255; // align to 256
-
-            size_t row_count = mip_height;
-            if (format_is_block_compressed(texture_format))
-            { // block compressed formats use block rows instead of pixel rows
-                row_count = (mip_height + 3) / 4;
-            }
-
-            uint8_t* dst_mip = mapped_ptr + write_offset;
-            uint8_t* src_mip = image_data + read_offset;
-
-            for (int row = 0; row < row_count; ++row)
-            {
-                memcpy(dst_mip + row * dst_row_pitch,
-                    src_mip + row * src_row_pitch,
-                    src_row_pitch);
-            }
-
-            read_offset  += src_row_pitch * row_count;
-            write_offset += dst_row_pitch * row_count;
-
-            // align to 512
-            write_offset = (write_offset + 511) & ~511;
+            memcpy(mapped_ptr + offset, image_data + offset, mip_size);
+            offset  += mip_size;
 
             printf("Mip level: %d\n", mip);
             printf("Mip width: %d\n", mip_width);
