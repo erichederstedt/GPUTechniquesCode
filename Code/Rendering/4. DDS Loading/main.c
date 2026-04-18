@@ -1234,7 +1234,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             .bind_types = {
                 BIND_TYPE_CBV
             },
-            .bind_types_count = 1
+            .bind_types_count = 1,
+            .buffer_usage = BUFFER_USAGE_DYNAMIC
         };
         device_create_buffer(device, buffer_description, &camera_constant_buffer);
 
@@ -1264,7 +1265,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     float camera_pitch = 0.0f;
     Mat4 camera_transform = M4D(1.0f);
     
-    double frame_time_buffer[1024] = {0};
+    double frame_time_buffer[32] = {0};
     int frame_time_buffer_count = 0;
     double frame_time = 0.0f;
     unsigned long long frame_counter = 0;
@@ -1336,9 +1337,9 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             struct Camera_Constant constant = { 
                 .world_to_clip = MulM4(camera_projection, InvGeneralM4(camera_transform))
             };
-            struct Constant* constant_buffer_ptr = command_list_map_buffer(command_list, camera_constant_buffer);
+            struct Constant* constant_buffer_ptr = buffer_map(camera_constant_buffer);
             memcpy(constant_buffer_ptr, &constant, sizeof(struct Camera_Constant));
-            command_list_unmap_buffer(command_list, camera_constant_buffer);
+            buffer_unmap(camera_constant_buffer);
         }
 
         command_list_set_constant_buffer(command_list, camera_cbv, 1);
