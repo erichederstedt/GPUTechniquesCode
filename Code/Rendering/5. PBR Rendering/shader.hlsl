@@ -51,10 +51,12 @@ cbuffer main_cbuffer : register(b1)
     uint lights;
 }
 
-Texture2D color_texture : register(t1);
-Texture2D normal_texture : register(t2);
+Texture2D eavg_lut : register(t1);
+Texture2D eo_lut : register(t2);
+Texture2D color_texture : register(t3);
+Texture2D normal_texture : register(t4);
 
-[RootSignature("RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), CBV(b0), CBV(b1), DescriptorTable(SRV(t0)), DescriptorTable(SRV(t1)), DescriptorTable(SRV(t2)), StaticSampler(s0)")]
+[RootSignature("RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT), CBV(b0), CBV(b1), DescriptorTable(SRV(t0)), DescriptorTable(SRV(t1)), DescriptorTable(SRV(t2)), DescriptorTable(SRV(t3)), DescriptorTable(SRV(t4)), StaticSampler(s0)")]
 vs_out VSMain(vs_in In)
 {
     vs_out Out;
@@ -92,10 +94,9 @@ float4 PSMain(vs_out In) : SV_TARGET
     TBN = transpose(TBN);
 	float3 pixel_normal = -normalize(mul(TBN, normal));
 
-    Material_Properties material;
-    material.baseColor = color.rgb;
-    material.metallic = 0.0f;
-    material.roughness = 0.5f;
+    float3 albedo = color.rgb;
+    float metallic = 0.0f;
+    float roughness = 0.5f;
     
     float3 light = float3(0, 0, 0);
     for (unsigned int i = 0; i < lights; i++) 
@@ -107,10 +108,10 @@ float4 PSMain(vs_out In) : SV_TARGET
             float3 V = normalize(camera_position - In.ws_pos.xyz);
             float3 N = pixel_normal;
 
-            light += BRDF(L, V, N, material);
-            // light += saturate(dot(-light_info.dir, In.ws_normal.xyz)) * color.rgb;
+            light += BRDF(L, N, V, albedo, roughness, metallic, eo_lut, eavg_lut, Sampler) * light_info.color.rgb * light_info.color.a;
         }
     }
 
     return float4(light, color.a);
+    //return float4(pixel_normal, color.a);
 }

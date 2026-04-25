@@ -966,8 +966,7 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
     device_create_upload_buffer(device, 0, buffer_allocation_info.size, &texture_upload_buffer);
 
     uint8_t* mapped_ptr = upload_buffer_map(texture_upload_buffer);
-    size_t read_offset = 0;
-    size_t write_offset = 0;
+    size_t offset = 0;
     for (unsigned int array_element = 0; array_element < texture_array_size; array_element++)
     {
         for (unsigned int mip = 0; mip < mip_count; ++mip)
@@ -975,30 +974,8 @@ void load_texture_dds(struct Texture *texture, struct Device *device, struct Des
             int mip_width = max(1, header->dwWidth >> mip);
             int mip_height = max(1, header->dwHeight >> mip);
             size_t mip_size = format_compute_mip_size(texture_format, mip_width, mip_height);
-            size_t src_row_pitch = format_compute_row_pitch_size(texture_format, mip_width);
-            size_t dst_row_pitch = (src_row_pitch + 255) & ~255; // align to 256
-
-            size_t row_count = mip_height;
-            if (format_is_block_compressed(texture_format))
-            { // block compressed formats use block rows instead of pixel rows
-                row_count = (mip_height + 3) / 4;
-            }
-
-            uint8_t* dst_mip = mapped_ptr + write_offset;
-            uint8_t* src_mip = image_data + read_offset;
-
-            for (int row = 0; row < row_count; ++row)
-            {
-                memcpy(dst_mip + row * dst_row_pitch,
-                    src_mip + row * src_row_pitch,
-                    src_row_pitch);
-            }
-
-            read_offset  += src_row_pitch * row_count;
-            write_offset += dst_row_pitch * row_count;
-
-            // align to 512
-            write_offset = (write_offset + 511) & ~511;
+            memcpy(mapped_ptr + offset, image_data + offset, mip_size);
+            offset  += mip_size;
 
             printf("Mip level: %d\n", mip);
             printf("Mip width: %d\n", mip_width);
@@ -1130,9 +1107,9 @@ void draw_node(struct Node* node, struct Device* device, struct Command_List* co
 
             command_list_set_constant_buffer(command_list, mesh_part->cbv, 0);
             if (mesh_part->color_texture)
-                command_list_set_texture_buffer(command_list, mesh_part->color_texture->srv, 3);
+                command_list_set_texture_buffer(command_list, mesh_part->color_texture->srv, 5);
             if (mesh_part->normal_texture)
-                command_list_set_texture_buffer(command_list, mesh_part->normal_texture->srv, 4);
+                command_list_set_texture_buffer(command_list, mesh_part->normal_texture->srv, 6);
             command_list_set_primitive_topology(command_list, PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             command_list_set_vertex_buffer(command_list, mesh_part->vertex_buffer, sizeof(struct Vertex) * mesh_part->vertex_count, sizeof(struct Vertex));
             command_list_set_index_buffer(command_list, mesh_part->index_buffer, sizeof(unsigned int) * mesh_part->index_count, FORMAT_R32_UINT);
@@ -1144,6 +1121,91 @@ void draw_node(struct Node* node, struct Device* device, struct Command_List* co
     {
         draw_node(node->child_array[i], device, command_list);
     }
+}
+
+void setup_shader_and_pso(struct Device* device, enum FORMAT swapchain_format, struct Shader** out_shader, struct Pipeline_State_Object** out_pipeline_state_object)
+{
+    if(device_create_shader(device, out_shader))
+        return;
+
+    struct Input_Element_Descriptor input_element_descriptors[] = {
+        {
+            .element_binding.name = "POS",
+            .format = FORMAT_R32G32B32_FLOAT,
+            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
+        },
+        {
+            .element_binding.name = "COL",
+            .format = FORMAT_R32G32B32A32_FLOAT,
+            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
+            .offset = offsetof(struct Vertex, color)
+        },
+        {
+            .element_binding.name = "NORMAL",
+            .format = FORMAT_R32G32B32_FLOAT,
+            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
+            .offset = offsetof(struct Vertex, normal)
+        },
+        {
+            .element_binding.name = "TANGENT",
+            .format = FORMAT_R32G32B32A32_FLOAT,
+            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
+            .offset = offsetof(struct Vertex, tangent)
+        },
+        {
+            .element_binding.name = "UV",
+            .format = FORMAT_R32G32_FLOAT,
+            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
+            .offset = offsetof(struct Vertex, uv)
+        },
+    };
+    struct Pipeline_State_Object_Descriptor pipeline_state_object_descriptor = {
+        .shader = *out_shader,
+        .blend_descriptor.alpha_to_coverage_enable = 0,
+        .blend_descriptor.independent_blend_enable = 0,
+        .sample_mask = UINT_MAX,
+        .rasterizer_descriptor.fill_mode = FILL_MODE_SOLID,
+        .rasterizer_descriptor.cull_mode = CULL_MODE_BACK,
+        .rasterizer_descriptor.front_counter_clockwise = 0,
+        .depth_stencil_descriptor.stencil_enable = 0,
+        .depth_stencil_descriptor.depth_enable = 1,
+        .depth_stencil_descriptor.depth_func = COMPARISON_FUNC_LESS,
+        .depth_stencil_descriptor.depth_write_mask = DEPTH_WRITE_MASK_ALL,
+        .depth_stencil_descriptor.front_face_op.stencil_func = COMPARISON_FUNC_ALWAYS,
+        .depth_stencil_descriptor.front_face_op.stencil_depth_fail_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.front_face_op.stencil_fail_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.front_face_op.stencil_pass_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.back_face_op.stencil_func = COMPARISON_FUNC_ALWAYS,
+        .depth_stencil_descriptor.back_face_op.stencil_depth_fail_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.back_face_op.stencil_fail_op = STENCIL_OP_KEEP,
+        .depth_stencil_descriptor.back_face_op.stencil_pass_op = STENCIL_OP_KEEP,
+        .input_element_descriptors = input_element_descriptors,
+        .input_element_descriptors_count = ARRAYSIZE(input_element_descriptors),
+        .primitive_topology_type = PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+        .render_target_count = 1,
+        .render_target_formats[0] = swapchain_format,
+        .depth_stencil_format = FORMAT_D24_UNORM_S8_UINT,
+        .sample_descriptor = {
+            .count = 1,
+            .quality = 0,
+        }
+    };
+    for (int i = 0; i < 8; ++i)
+    {
+        pipeline_state_object_descriptor.blend_descriptor.render_target_blend_descriptors[i] = (struct Render_Target_Blend_Descriptor){
+            .blend_enable = 1,
+            .logic_op_enable = 0,
+            .src_blend_type = BLEND_TYPE_SRC_ALPHA,
+            .src_blend_type_alpha = BLEND_TYPE_ONE,
+            .dest_blend_type = BLEND_TYPE_INV_SRC_ALPHA,
+            .blend_op = BLEND_OP_ADD,
+            .logic_op = LOGIC_OP_NOOP,
+            .dest_blend_type_alpha = BLEND_TYPE_INV_SRC_ALPHA,
+            .blend_op_alpha = BLEND_OP_ADD,
+            .render_target_write_mask = 0x0F
+        };
+    }
+    device_create_pipeline_state_object(device, pipeline_state_object_descriptor, out_pipeline_state_object);
 }
 
 int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
@@ -1212,87 +1274,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     }
     
     struct Shader* shader = 0;
-    device_create_shader(device, &shader);
-
-    struct Input_Element_Descriptor input_element_descriptors[] = {
-        {
-            .element_binding.name = "POS",
-            .format = FORMAT_R32G32B32_FLOAT,
-            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
-        },
-        {
-            .element_binding.name = "COL",
-            .format = FORMAT_R32G32B32A32_FLOAT,
-            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
-            .offset = offsetof(struct Vertex, color)
-        },
-        {
-            .element_binding.name = "NORMAL",
-            .format = FORMAT_R32G32B32_FLOAT,
-            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
-            .offset = offsetof(struct Vertex, normal)
-        },
-        {
-            .element_binding.name = "TANGENT",
-            .format = FORMAT_R32G32B32A32_FLOAT,
-            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
-            .offset = offsetof(struct Vertex, tangent)
-        },
-        {
-            .element_binding.name = "UV",
-            .format = FORMAT_R32G32_FLOAT,
-            .element_classification = INPUT_ELEMENT_CLASSIFICATION_PER_VERTEX,
-            .offset = offsetof(struct Vertex, uv)
-        },
-    };
-    struct Pipeline_State_Object_Descriptor pipeline_state_object_descriptor = {
-        .shader = shader,
-        .blend_descriptor.alpha_to_coverage_enable = 0,
-        .blend_descriptor.independent_blend_enable = 0,
-        .sample_mask = UINT_MAX,
-        .rasterizer_descriptor.fill_mode = FILL_MODE_SOLID,
-        .rasterizer_descriptor.cull_mode = CULL_MODE_BACK,
-        .rasterizer_descriptor.front_counter_clockwise = 0,
-        .depth_stencil_descriptor.stencil_enable = 0,
-        .depth_stencil_descriptor.depth_enable = 1,
-        .depth_stencil_descriptor.depth_func = COMPARISON_FUNC_LESS,
-        .depth_stencil_descriptor.depth_write_mask = DEPTH_WRITE_MASK_ALL,
-        .depth_stencil_descriptor.front_face_op.stencil_func = COMPARISON_FUNC_ALWAYS,
-        .depth_stencil_descriptor.front_face_op.stencil_depth_fail_op = STENCIL_OP_KEEP,
-        .depth_stencil_descriptor.front_face_op.stencil_fail_op = STENCIL_OP_KEEP,
-        .depth_stencil_descriptor.front_face_op.stencil_pass_op = STENCIL_OP_KEEP,
-        .depth_stencil_descriptor.back_face_op.stencil_func = COMPARISON_FUNC_ALWAYS,
-        .depth_stencil_descriptor.back_face_op.stencil_depth_fail_op = STENCIL_OP_KEEP,
-        .depth_stencil_descriptor.back_face_op.stencil_fail_op = STENCIL_OP_KEEP,
-        .depth_stencil_descriptor.back_face_op.stencil_pass_op = STENCIL_OP_KEEP,
-        .input_element_descriptors = input_element_descriptors,
-        .input_element_descriptors_count = ARRAYSIZE(input_element_descriptors),
-        .primitive_topology_type = PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
-        .render_target_count = 1,
-        .render_target_formats[0] = swapchain_descriptor.format,
-        .depth_stencil_format = FORMAT_D24_UNORM_S8_UINT,
-        .sample_descriptor = {
-            .count = 1,
-            .quality = 0,
-        }
-    };
-    for (int i = 0; i < 8; ++i)
-    {
-        pipeline_state_object_descriptor.blend_descriptor.render_target_blend_descriptors[i] = (struct Render_Target_Blend_Descriptor){
-            .blend_enable = 1,
-            .logic_op_enable = 0,
-            .src_blend_type = BLEND_TYPE_SRC_ALPHA,
-            .src_blend_type_alpha = BLEND_TYPE_ONE,
-            .dest_blend_type = BLEND_TYPE_INV_SRC_ALPHA,
-            .blend_op = BLEND_OP_ADD,
-            .logic_op = LOGIC_OP_NOOP,
-            .dest_blend_type_alpha = BLEND_TYPE_INV_SRC_ALPHA,
-            .blend_op_alpha = BLEND_OP_ADD,
-            .render_target_write_mask = 0x0F
-        };
-    }
     struct Pipeline_State_Object* pipeline_state_object = 0;
-    device_create_pipeline_state_object(device, pipeline_state_object_descriptor, &pipeline_state_object);
+    setup_shader_and_pso(device, swapchain_descriptor.format, &shader, &pipeline_state_object);
 
     #pragma pack(push, 1)
     struct Main_Constant
@@ -1373,6 +1356,44 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         };
         device_create_shader_resource_view(device, &srv_desc, cbv_srv_uav_descriptor_set, light_buffer, &light_srv);
     }
+
+    struct Buffer* eo_lut_buffer = 0;
+    struct Shader_Resource_View* eo_lut_srv = 0;
+    {
+        struct Buffer_Descriptor buffer_description = {
+            .width = 32,
+            .height = 32,
+            .buffer_type = BUFFER_TYPE_TEXTRUE2D,
+            .format = FORMAT_R16_FLOAT,
+            .bind_types = {
+                BIND_TYPE_SRV
+            },
+            .bind_types_count = 1
+        };
+        device_create_buffer(device, buffer_description, &eo_lut_buffer);
+        device_create_shader_resource_view(device, 0, cbv_srv_uav_descriptor_set, eo_lut_buffer, &eo_lut_srv);
+
+        struct Allocation_Info alloc_info = device_get_allocation_info(device, buffer_description);
+        alloc_info;
+        puts("ss");
+    }
+
+    struct Buffer* eavg_lut_buffer = 0;
+    struct Shader_Resource_View* eavg_lut_srv = 0;
+    {
+        struct Buffer_Descriptor buffer_description = {
+            .width = 32,
+            .height = 1,
+            .buffer_type = BUFFER_TYPE_TEXTRUE2D,
+            .format = FORMAT_R16_FLOAT,
+            .bind_types = {
+                BIND_TYPE_SRV
+            },
+            .bind_types_count = 1
+        };
+        device_create_buffer(device, buffer_description, &eavg_lut_buffer);
+        device_create_shader_resource_view(device, 0, cbv_srv_uav_descriptor_set, eavg_lut_buffer, &eavg_lut_srv);
+    }
     
     #define BISTRO
     #ifdef BISTRO
@@ -1391,6 +1412,46 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         command_list_reset(upload_command_list);
 
         upload_node_buffers(scene_node, device, upload_command_list, cbv_srv_uav_descriptor_set);
+
+        // Load eo_lut
+        {
+            FILE* file = fopen("Eo.r16f", "rb");
+            if (!file)
+                __debugbreak();
+
+            fseek(file, 0L, SEEK_END);
+            size_t file_size = ftell(file);
+            fseek(file, 0L, SEEK_SET);
+
+            char* buffer = malloc(file_size);
+            fread(buffer, 1, file_size, file);
+            fclose(file);
+
+            void* eo_lut_buffer_ptr = command_list_map_buffer(upload_command_list, eo_lut_buffer);
+            memcpy(eo_lut_buffer_ptr, buffer, file_size);
+            command_list_unmap_buffer(upload_command_list, eo_lut_buffer);
+            free(buffer);
+        }
+
+        // Load eavg_lut
+        {
+            FILE* file = fopen("Eavg.r16f", "rb");
+            if (!file)
+                __debugbreak();
+
+            fseek(file, 0L, SEEK_END);
+            size_t file_size = ftell(file);
+            fseek(file, 0L, SEEK_SET);
+
+            char* buffer = malloc(file_size);
+            fread(buffer, 1, file_size, file);
+            fclose(file);
+
+            void* eavg_lut_buffer_ptr = command_list_map_buffer(upload_command_list, eavg_lut_buffer);
+            memcpy(eavg_lut_buffer_ptr, buffer, file_size);
+            command_list_unmap_buffer(upload_command_list, eavg_lut_buffer);
+            free(buffer);
+        }
 
         command_list_close(upload_command_list);
 
@@ -1412,8 +1473,18 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     int frame_time_buffer_count = 0;
     double frame_time = 0.0f;
     unsigned long long frame_counter = 0;
+    FILETIME lastWrite = {0};
     while (!DoneRunning)
     {
+        WIN32_FILE_ATTRIBUTE_DATA attrs;
+        GetFileAttributesExW(L"shader.hlsl", GetFileExInfoStandard, &attrs);
+        if (CompareFileTime(&lastWrite, &attrs.ftLastWriteTime) != 0) {
+            Sleep(100);
+            setup_shader_and_pso(device, swapchain_descriptor.format, &shader, &pipeline_state_object);
+            lastWrite = attrs.ftLastWriteTime;
+            printf("reloaded shader");
+        }
+
         unsigned long long timestamp1 = GetRdtsc();
 
         MSG Message;
@@ -1482,8 +1553,9 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
                 .camera_position = camera_position,
                 .lights = 1
             };
-            struct Constant* constant_buffer_ptr = command_list_map_buffer(command_list, camera_constant_buffer);
-            memcpy(constant_buffer_ptr, &constant, sizeof(struct Main_Constant));
+            struct Main_Constant* constant_buffer_ptr = command_list_map_buffer(command_list, camera_constant_buffer);
+            *constant_buffer_ptr = constant;
+            // memcpy(constant_buffer_ptr, &constant, sizeof(struct Main_Constant));
             command_list_unmap_buffer(command_list, camera_constant_buffer);
         }
 
@@ -1494,6 +1566,8 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         }
 
         command_list_set_texture_buffer(command_list, light_srv, 2);
+        command_list_set_texture_buffer(command_list, eavg_lut_srv, 3);
+        command_list_set_texture_buffer(command_list, eo_lut_srv, 4);
         command_list_set_constant_buffer(command_list, camera_cbv, 1);
         draw_node(scene_node, device, command_list);
         
