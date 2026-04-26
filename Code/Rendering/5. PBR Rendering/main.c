@@ -1372,10 +1372,6 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         };
         device_create_buffer(device, buffer_description, &eo_lut_buffer);
         device_create_shader_resource_view(device, 0, cbv_srv_uav_descriptor_set, eo_lut_buffer, &eo_lut_srv);
-
-        struct Allocation_Info alloc_info = device_get_allocation_info(device, buffer_description);
-        alloc_info;
-        puts("ss");
     }
 
     struct Buffer* eavg_lut_buffer = 0;
