@@ -1399,10 +1399,10 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     #ifdef BISTRO
     char* asset_path = get_asset_path("BistroExterior.fbx");
     #else
-    char* asset_path = get_asset_path("NewSponza_Main_Yup_003.fbx");
+    char* asset_path = get_asset_path("Sphere.fbx");
     #endif
     struct Node* scene_node = load_fbx(asset_path);
-    scene_node->local_scale = V3(1.0f, 1.0f, 1.0f);
+    scene_node->local_scale = V3(0.5f, 0.5f, 0.5f);
     free(asset_path);
 
     {
@@ -1463,9 +1463,9 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     float camera_yaw = -47.7283516f;
     float camera_pitch = 21.6109619f;
     #else
-    Vec3 camera_position = { 3.18551230f, 3.31043482f, 3.04728985f };
-    float camera_yaw = 227.332336f;
-    float camera_pitch = 38.3568611f;
+    Vec3 camera_position = { 0.0f, 0.0f, 1.0f };
+    float camera_yaw = 180.0f;
+    float camera_pitch = 0.0f;
     #endif
     Mat4 camera_transform = M4D(1.0f);
     
