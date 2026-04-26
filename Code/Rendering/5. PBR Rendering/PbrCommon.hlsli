@@ -52,7 +52,7 @@ float3 BRDF(float3 N, float3 L, float3 V, float3 albedo, float roughness, float 
     float LdotN = saturate(dot(L, N));
 
     float3 diffuse = albedo * LdotN;
-    #if 1
+    #if 0
     // Phong
     float3 R = reflect(-L, N);
     float3 specular = pow(saturate(dot(V, R)), 40.0);
