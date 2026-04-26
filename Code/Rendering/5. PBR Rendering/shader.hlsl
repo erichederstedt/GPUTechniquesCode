@@ -83,9 +83,10 @@ SamplerState Sampler : register(s0)
 };
 float4 PSMain(vs_out In) : SV_TARGET
 {
-    float4 color = color_texture.Sample(Sampler, In.uv);
-    float3 normal = normal_texture.Sample(Sampler, In.uv).rgb * 2.0 - 1.0;
+    // float4 color = color_texture.Sample(Sampler, In.uv);
+    // float3 normal = normal_texture.Sample(Sampler, In.uv).rgb * 2.0 - 1.0;
 
+    #if 0
     float3x3 TBN = float3x3(
 		normalize(In.ws_tangent.xyz),
 		normalize(In.ws_bitangent.xyz),
@@ -93,25 +94,29 @@ float4 PSMain(vs_out In) : SV_TARGET
 	);
     TBN = transpose(TBN);
 	float3 pixel_normal = -normalize(mul(TBN, normal));
-
     float3 albedo = color.rgb;
+    #else
+    float3 pixel_normal = In.ws_normal.xyz;
+    float3 albedo = float3(0.25, 0.0, 0.0);
+    #endif
+
     float metallic = 0.0f;
     float roughness = 0.5f;
     
-    float3 light = float3(0, 0, 0);
-    for (unsigned int i = 0; i < lights; i++) 
+    float3 light = float3(0.01, 0, 0);
+    for (unsigned int i = 0; i < lights; i++)
     {
         Light_Info light_info = light_buffer[i];
         if (light_info.type == LIGHT_TYPE_DIRECTIONAL) 
         {
             float3 L = -light_info.dir;
             float3 V = normalize(camera_position - In.ws_pos.xyz);
-            float3 N = pixel_normal;
+            float3 N = normalize(pixel_normal);
 
-            light += BRDF(L, N, V, albedo, roughness, metallic, eo_lut, eavg_lut, Sampler) * light_info.color.rgb * light_info.color.a;
+            light += BRDF(N, L, V, albedo, roughness, metallic, eo_lut, eavg_lut, Sampler) * light_info.color.rgb * light_info.color.a;
         }
     }
 
-    return float4(light, color.a);
-    //return float4(pixel_normal, color.a);
+    light = pow(light, float3(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2) ); // gamma correction
+    return float4(light, 1.0);
 }

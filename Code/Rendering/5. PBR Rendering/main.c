@@ -1329,7 +1329,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     struct Light_Info lights[8] = {{
         .type = LIGHT_TYPE_DIRECTIONAL,
         .color = V4(1.0f, 1.0f, 1.0f, 1.0f),
-        .dir = NormV3(V3(-1.0f, -1.0f, -1.0f))
+        .dir = NormV3(V3(1.0f, -1.0f, -1.0f))
     }};
     struct Buffer* light_buffer = 0;
     struct Shader_Resource_View* light_srv = 0;
@@ -1391,7 +1391,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_shader_resource_view(device, 0, cbv_srv_uav_descriptor_set, eavg_lut_buffer, &eavg_lut_srv);
     }
     
-    #define BISTRO
+    // #define BISTRO
     #ifdef BISTRO
     char* asset_path = get_asset_path("BistroExterior.fbx");
     #else

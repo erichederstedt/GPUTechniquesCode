@@ -49,11 +49,22 @@ float3 fresnelSchlick(float3 F0, float3 V, float3 H)
 
 float3 BRDF(float3 N, float3 L, float3 V, float3 albedo, float roughness, float metalness, Texture2D EoLUT, Texture2D EavgLUT, SamplerState smp)
 {
-    float3 R = reflect(L, N);
-    float3 diffuse = dot(N, L) * albedo;
-    float3 specular = pow(saturate(dot(V, R)), 8.0) * albedo;
+    float LdotN = saturate(dot(L, N));
+
+    float3 diffuse = albedo * LdotN;
+    #if 1
+    // Phong
+    float3 R = reflect(-L, N);
+    float3 specular = pow(saturate(dot(V, R)), 40.0);
+    #else
+    // Blinn-Phong
+    float3 H = normalize(V + L);    
+    float3 specular = pow(saturate(dot(H, N)), 40.0);
+    #endif
 
     return roughness * diffuse + (1.0 - roughness) * specular;
+
+    return 1.0 * diffuse + 1.0 * specular;
 }
 
 float attenuation(in float dist2, in float range2) // dist2 = dist * dist, range2 = range * range
