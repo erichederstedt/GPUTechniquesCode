@@ -1399,7 +1399,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_shader_resource_view(device, 0, cbv_srv_uav_descriptor_set, eavg_lut_buffer, &eavg_lut_srv);
     }
     
-    #define BISTRO
+    // #define BISTRO
     #ifdef BISTRO
     char* asset_path = get_asset_path("BistroExterior.fbx");
     #else

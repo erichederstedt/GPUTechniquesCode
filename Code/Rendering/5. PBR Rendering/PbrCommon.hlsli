@@ -47,24 +47,58 @@ float3 fresnelSchlick(float3 F0, float3 V, float3 H)
     return F0 + (float3(1.0, 1.0, 1.0)-F0) * t;
 }
 
+float3 Phong_BRDF(float3 N, float3 L, float3 V, float3 albedo, float shininess, float diffuse_power, float specular_power)
+{
+    float LdotN = saturate(dot(L, N));
+    float3 R = reflect(-L, N);
+
+    float3 diffuse = albedo * LdotN;
+    float3 specular = pow(saturate(dot(V, R)), shininess);
+
+    return diffuse_power * diffuse + specular_power * specular;
+}
+
+float3 Blinn_Phong_BRDF(float3 N, float3 L, float3 V, float3 albedo, float shininess, float diffuse_power, float specular_power)
+{
+    float LdotN = saturate(dot(L, N));
+    float3 H = normalize(V + L);    
+
+    float3 diffuse = albedo * LdotN;
+    float3 specular = pow(saturate(dot(H, N)), shininess);
+
+    return diffuse_power * diffuse + specular_power * specular;
+}
+
+float3 Cook_Torrance_BRDF(float3 N, float3 L, float3 V, float3 albedo, float shininess, float roughness)
+{
+    float LdotN = saturate(dot(L, N));
+    float3 H = normalize(V + L);    
+
+    float3 diffuse = albedo;
+    float3 specular = pow(saturate(dot(H, N)), shininess);
+
+    return LdotN * (roughness * diffuse + (1.0 - roughness) * specular);
+}
+
 float3 BRDF(float3 N, float3 L, float3 V, float3 albedo, float roughness, float metalness, Texture2D EoLUT, Texture2D EavgLUT, SamplerState smp)
 {
     float LdotN = saturate(dot(L, N));
 
-    float3 diffuse = albedo * LdotN;
-    #if 0
-    // Phong
-    float3 R = reflect(-L, N);
-    float3 specular = pow(saturate(dot(V, R)), 40.0);
-    #else
-    // Blinn-Phong
-    float3 H = normalize(V + L);    
-    float3 specular = pow(saturate(dot(H, N)), 40.0);
-    #endif
+    #define BRDF_MODEL 2
+    if (BRDF_MODEL == 0)
+    {
+        return Phong_BRDF(N, L, V, albedo, 40.0, 1.0, 1.0);
+    }
+    else if (BRDF_MODEL == 1)
+    {
+        return Blinn_Phong_BRDF(N, L, V, albedo, 40.0, 1.0, 1.0);
+    }
+    else if (BRDF_MODEL == 2)
+    {
+        return Cook_Torrance_BRDF(N, L, V, albedo, 40.0, 0.5);
+    }
 
-    return roughness * diffuse + (1.0 - roughness) * specular;
-
-    return 1.0 * diffuse + 1.0 * specular;
+    return float3(1.0, 1.0, 1.0);
 }
 
 float attenuation(in float dist2, in float range2) // dist2 = dist * dist, range2 = range * range
