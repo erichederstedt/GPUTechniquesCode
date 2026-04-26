@@ -1403,7 +1403,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
     #ifdef BISTRO
     char* asset_path = get_asset_path("BistroExterior.fbx");
     #else
-    char* asset_path = get_asset_path("Sphere.fbx");
+    char* asset_path = get_asset_path("Sphere_High.fbx");
     #endif
     struct Node* scene_node = load_fbx(asset_path);
     scene_node->local_scale = V3(0.5f, 0.5f, 0.5f);

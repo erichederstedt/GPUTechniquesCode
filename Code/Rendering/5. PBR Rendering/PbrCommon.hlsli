@@ -49,40 +49,68 @@ float3 fresnelSchlick(float3 F0, float3 V, float3 H)
 
 float3 Phong_BRDF(float3 N, float3 L, float3 V, float3 albedo, float shininess, float diffuse_power, float specular_power)
 {
-    float LdotN = saturate(dot(L, N));
+    float NdotL = saturate(dot(N, L));
     float3 R = reflect(-L, N);
+    float VdotR = dot(V, R);
 
-    float3 diffuse = albedo * LdotN;
-    float3 specular = pow(saturate(dot(V, R)), shininess);
+    float3 diffuse = albedo * NdotL;
+    float3 specular = pow(saturate(VdotR), shininess);
 
     return diffuse_power * diffuse + specular_power * specular;
 }
 
 float3 Blinn_Phong_BRDF(float3 N, float3 L, float3 V, float3 albedo, float shininess, float diffuse_power, float specular_power)
 {
-    float LdotN = saturate(dot(L, N));
+    float NdotL = saturate(dot(N, L));
     float3 H = normalize(V + L);    
+    float HdotN = dot(H, N);
 
-    float3 diffuse = albedo * LdotN;
-    float3 specular = pow(saturate(dot(H, N)), shininess);
+    float3 diffuse = albedo * NdotL;
+    float3 specular = pow(saturate(HdotN), shininess);
 
     return diffuse_power * diffuse + specular_power * specular;
 }
 
-float3 Cook_Torrance_BRDF(float3 N, float3 L, float3 V, float3 albedo, float shininess, float roughness)
+float Cook_Torrance_D_blinn(float3 N, float3 H, float a)
 {
-    float LdotN = saturate(dot(L, N));
-    float3 H = normalize(V + L);    
+    float a2 = max(a * a, 0.001);
+    float HdotN = dot(H, N);
+    return 1.0 / (PI * a2) * pow(saturate(HdotN), 2.0 / a2 - 2.0);
+}
+float Cook_Torrance_G_cook_torrance(float3 N, float3 L, float3 V, float3 H)
+{
+    float HdotN = dot(H, N);
+    float VdotH = dot(V, H);
+    float NdotV = saturate(dot(N, V));
+    float NdotL = dot(N, L);
+    return min(1.0, min((2.0 * HdotN * NdotV) / VdotH, (2.0 * HdotN * NdotL) / VdotH));
+}
+float3 Cook_Torrance_F_schlick(float3 V, float3 H, float3 albedo, float metallic)
+{
+    float VdotH = dot(V, H);
+    float n = 1.5; // IOR common for dielectrics, resulting in 0.04
+    float3 F0 = lerp(pow(n-1, 2.0) / pow(n+1, 2.0), albedo, metallic);
+    return F0 + (float3(1.0, 1.0, 1.0) - F0) * pow(saturate(1.0 - VdotH), 5.0);
+}
+float3 Cook_Torrance_BRDF(float3 N, float3 L, float3 V, float3 albedo, float metallic, float roughness)
+{
+    float NdotL = saturate(dot(N, L));
+    float NdotV = saturate(dot(N, V));
+    float3 H = normalize(V + L);
 
     float3 diffuse = albedo;
-    float3 specular = pow(saturate(dot(H, N)), shininess);
 
-    return LdotN * (roughness * diffuse + (1.0 - roughness) * specular);
+    float D = Cook_Torrance_D_blinn(N, H, roughness * roughness);
+    float G = Cook_Torrance_G_cook_torrance(N, L, V, H);
+    float3 F = Cook_Torrance_F_schlick(V, H, albedo, metallic);
+    float3 specular = (D * G * F) / (4.0 * max(NdotL, 0.001) * max(NdotV, 0.001));
+
+    return NdotL * ((1.0 - metallic) * diffuse + metallic * specular);
 }
 
 float3 BRDF(float3 N, float3 L, float3 V, float3 albedo, float roughness, float metalness, Texture2D EoLUT, Texture2D EavgLUT, SamplerState smp)
 {
-    float LdotN = saturate(dot(L, N));
+    float NdotL = saturate(dot(N, L));
 
     #define BRDF_MODEL 2
     if (BRDF_MODEL == 0)
@@ -95,10 +123,10 @@ float3 BRDF(float3 N, float3 L, float3 V, float3 albedo, float roughness, float 
     }
     else if (BRDF_MODEL == 2)
     {
-        return Cook_Torrance_BRDF(N, L, V, albedo, 40.0, 0.5);
+        return Cook_Torrance_BRDF(N, L, V, albedo, 0.5, 0.5);
     }
 
-    return float3(1.0, 1.0, 1.0);
+    return float3(1.0, 1.0, 1.0) * NdotL; // Lambertian
 }
 
 float attenuation(in float dist2, in float range2) // dist2 = dist * dist, range2 = range * range
