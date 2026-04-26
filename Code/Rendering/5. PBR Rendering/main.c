@@ -1043,6 +1043,10 @@ void upload_node_buffers(struct Node *node, struct Device *device, struct Comman
             struct Model_Constant
             {
                 Mat4 model_to_world;
+                unsigned int enabled_color_texture;
+                unsigned int enabled_normal_texture;
+                unsigned int enabled_roughness_texture;
+                unsigned int enabled_metallic_texture;
             };
             {
                 struct Buffer_Descriptor buffer_description = {
@@ -1062,7 +1066,11 @@ void upload_node_buffers(struct Node *node, struct Device *device, struct Comman
             struct Upload_Buffer* constant_upload_buffer = 0;
             {
                 struct Model_Constant constant = { 
-                    .model_to_world = node_global_transform_geometry(node)
+                    .model_to_world = node_global_transform_geometry(node),
+                    .enabled_color_texture = mesh_part->color_texture != 0,
+                    .enabled_normal_texture = mesh_part->normal_texture != 0,
+                    .enabled_roughness_texture = 0,
+                    .enabled_metallic_texture = 0,
                 };
                 device_create_upload_buffer(device, &constant, sizeof(struct Model_Constant), &constant_upload_buffer);
             }
@@ -1391,7 +1399,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
         device_create_shader_resource_view(device, 0, cbv_srv_uav_descriptor_set, eavg_lut_buffer, &eavg_lut_srv);
     }
     
-    // #define BISTRO
+    #define BISTRO
     #ifdef BISTRO
     char* asset_path = get_asset_path("BistroExterior.fbx");
     #else

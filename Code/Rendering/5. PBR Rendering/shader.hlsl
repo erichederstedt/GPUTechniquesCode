@@ -42,6 +42,10 @@ StructuredBuffer<Light_Info> light_buffer : register(t0);
 cbuffer model_cbuffer : register(b0)
 {
     float4x4 model_to_world;
+    uint enabled_color_texture;
+    uint enabled_normal_texture;
+    uint enabled_roughness_texture;
+    uint enabled_metallic_texture;
 }
 
 cbuffer main_cbuffer : register(b1)
@@ -83,27 +87,29 @@ SamplerState Sampler : register(s0)
 };
 float4 PSMain(vs_out In) : SV_TARGET
 {
-    // float4 color = color_texture.Sample(Sampler, In.uv);
-    // float3 normal = normal_texture.Sample(Sampler, In.uv).rgb * 2.0 - 1.0;
-
-    #if 0
-    float3x3 TBN = float3x3(
-		normalize(In.ws_tangent.xyz),
-		normalize(In.ws_bitangent.xyz),
-		normalize(In.ws_normal.xyz)
-	);
-    TBN = transpose(TBN);
-	float3 pixel_normal = -normalize(mul(TBN, normal));
-    float3 albedo = color.rgb;
-    #else
+    float4 color = float4(0.25, 0.0, 0.0, 1.0);
+    if (enabled_color_texture)
+    {
+        color = color_texture.Sample(Sampler, In.uv);
+    }
     float3 pixel_normal = In.ws_normal.xyz;
-    float3 albedo = float3(0.25, 0.0, 0.0);
-    #endif
-
+    if (enabled_normal_texture)
+    {
+        float3 normal = normal_texture.Sample(Sampler, In.uv).rgb * 2.0 - 1.0;
+        float3x3 TBN = float3x3(
+            normalize(In.ws_tangent.xyz),
+            normalize(In.ws_bitangent.xyz),
+            normalize(In.ws_normal.xyz)
+        );
+        TBN = transpose(TBN);
+        pixel_normal = -normalize(mul(TBN, normal));
+    }
+    
+    float3 albedo = color.rgb;
     float metallic = 0.0f;
     float roughness = 0.5f;
     
-    float3 light = float3(0.01, 0, 0);
+    float3 light = float3(0.01, 0.01, 0.01) * albedo;
     for (unsigned int i = 0; i < lights; i++)
     {
         Light_Info light_info = light_buffer[i];
