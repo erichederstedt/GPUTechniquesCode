@@ -1482,7 +1482,7 @@ int CALLBACK WinMain(HINSTANCE CurrentInstance, HINSTANCE PrevInstance, LPSTR Co
             Sleep(100);
             setup_shader_and_pso(device, swapchain_descriptor.format, &shader, &pipeline_state_object);
             lastWrite = attrs.ftLastWriteTime;
-            printf("reloaded shader");
+            printf("reloaded shader\n");
         }
 
         unsigned long long timestamp1 = GetRdtsc();
